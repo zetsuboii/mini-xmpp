@@ -12,7 +12,9 @@ name = "server"
 [dependencies]
 # Serialization
 serde = "1.*"
-serde-xml-rs = "0.6.*"
+quick-xml = {version = "0.29.0", features = ["serialize"]}
+xmlserde = "0.5.0"
+xmlserde_derives = "0.5.0"
 url = "2.5.0"
 
 # Errors

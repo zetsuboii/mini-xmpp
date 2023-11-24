@@ -40,5 +40,8 @@ async fn accept_connection(stream: TcpStream) {
         .expect("failed to send hello message");
 
     // Forward what's read to write
-    read.forward(write).await.expect("forwarding failed");
+    read.inspect(|v| { dbg!(v); } )
+        .forward(write)
+        .await
+        .expect("forwarding failed");
 }
