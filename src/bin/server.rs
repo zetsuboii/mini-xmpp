@@ -1,6 +1,8 @@
+use mini_jabber::*;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
+use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
@@ -31,17 +33,21 @@ async fn accept_connection(stream: TcpStream) {
 
     println!("new websocket connection: {}", addr);
 
-    let (mut write, read) = ws_stream.split();
+    let (mut write, mut read) = ws_stream.split();
 
-    // Send hello message
+    // Read initial header
+    let initial_header = read.get_next_text().await.expect("failed to get header");
+    let initial_header: InitialStreamHeader =
+        xml_deserialize_from_str(&initial_header).expect("failed to parse header");
+
+    // Append id to header
+    let id = "++123456789++".to_string();
+    let response_header = initial_header.into_response(id);
+    let response_header = xml_serialize(response_header);
+
+    // Send response header
     write
-        .send(Message::Text("hello\n".into()))
+        .send(Message::Text(response_header))
         .await
         .expect("failed to send hello message");
-
-    // Forward what's read to write
-    read.inspect(|v| { dbg!(v); } )
-        .forward(write)
-        .await
-        .expect("forwarding failed");
 }

@@ -25,3 +25,4 @@ tokio = { version = "1.34.*", features = ["full"] }
 tokio-tungstenite = "0.20.*"
 futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
 futures-channel = "0.3.28"
+async-trait = "0.1.74"

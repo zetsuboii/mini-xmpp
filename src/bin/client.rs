@@ -1,8 +1,8 @@
+use mini_jabber::*;
 use futures_util::{SinkExt, StreamExt};
-use mini_jabber::xmpp::InitialStreamHeader;
 use tokio::io::AsyncReadExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use xmlserde::xml_serialize;
+use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
@@ -29,20 +29,18 @@ async fn echo_client() {
     };
 
     let serialized_header = xml_serialize(initial_header);
-    println!("Sending {}", &serialized_header);
+    println!("sending initial header");
 
     write
         .send(Message::Text(serialized_header))
         .await
         .expect("failed to send initial header");
 
-    read.next().await; // Skip hello message
+    let response_header = read.get_next_text().await.expect("failed to get response");
+    let response_header: ResponseStreamHeader =
+        xml_deserialize_from_str(&response_header).expect("failed to parse header");
 
-    let msg = read.next().await.unwrap().unwrap();
-    dbg!(msg);
-
-    let msg = read.next().await.unwrap().unwrap();
-    dbg!(msg);
+    println!("got id: {}", response_header.id);
 }
 
 // Our helper method which will read data from stdin and send it along the
