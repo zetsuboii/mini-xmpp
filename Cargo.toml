@@ -3,12 +3,17 @@ name = "mini-jabber"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "client"
+
+[[bin]]
+name = "server"
 
 [dependencies]
 # Serialization
 serde = "1.*"
 serde-xml-rs = "0.6.*"
+url = "2.5.0"
 
 # Errors
 color-eyre = "0.6.*"
@@ -17,3 +22,4 @@ color-eyre = "0.6.*"
 tokio = { version = "1.34.*", features = ["full"] }
 tokio-tungstenite = "0.20.*"
 futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
+futures-channel = "0.3.28"

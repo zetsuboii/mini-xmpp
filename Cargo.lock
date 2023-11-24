@@ -168,6 +168,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures-channel"
+version = "0.3.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff4dd66668b557604244583e3e1e1eada8c5c2e96a6d0d6653ede395b78bbacb"
+dependencies = [
+ "futures-core",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -310,11 +319,13 @@ name = "mini-jabber"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
+ "futures-channel",
  "futures-util",
  "serde",
  "serde-xml-rs",
  "tokio",
  "tokio-tungstenite",
+ "url",
 ]
 
 [[package]]
