@@ -1,15 +1,18 @@
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use mini_jabber::*;
-use futures_util::{SinkExt, StreamExt};
-use tokio::io::AsyncReadExt;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio::{io::AsyncReadExt, net::TcpStream};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
-    echo_client().await;
+    run_client().await;
 }
 
-async fn echo_client() {
+async fn run_client() {
     println!(":: websocket echo client ::");
     let address = "ws://127.0.0.1:9292";
     let url = url::Url::parse(address).expect("invalid address");
@@ -17,8 +20,15 @@ async fn echo_client() {
     let (ws_stream, _) = connect_async(url).await.expect("failed to connect");
     println!("websocket handshake has been successfully completed");
 
-    let (mut write, mut read) = ws_stream.split();
+    let (mut writer, mut reader) = ws_stream.split();
 
+    // Do the handshake
+    handshake(&mut reader, &mut writer).await.unwrap();
+}
+
+type Reader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+type Writer = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
     let initial_header = InitialStreamHeader {
         from: "zet@mail.com".to_string(),
         to: "su@mail.com".to_string(),
@@ -31,16 +41,21 @@ async fn echo_client() {
     let serialized_header = xml_serialize(initial_header);
     println!("sending initial header");
 
-    write
+    writer
         .send(Message::Text(serialized_header))
         .await
         .expect("failed to send initial header");
 
-    let response_header = read.get_next_text().await.expect("failed to get response");
+    let response_header = reader
+        .get_next_text()
+        .await
+        .expect("failed to get response");
     let response_header: ResponseStreamHeader =
         xml_deserialize_from_str(&response_header).expect("failed to parse header");
 
     println!("got id: {}", response_header.id);
+
+    Ok(())
 }
 
 // Our helper method which will read data from stdin and send it along the

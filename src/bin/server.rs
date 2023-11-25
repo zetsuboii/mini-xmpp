@@ -1,7 +1,10 @@
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use mini_jabber::*;
-use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
@@ -33,10 +36,17 @@ async fn accept_connection(stream: TcpStream) {
 
     println!("new websocket connection: {}", addr);
 
-    let (mut write, mut read) = ws_stream.split();
+    let (mut writer, mut reader) = ws_stream.split();
 
+    handshake(&mut reader, &mut writer).await.unwrap();
+}
+
+type Reader = SplitStream<WebSocketStream<TcpStream>>;
+type Writer = SplitSink<WebSocketStream<TcpStream>, Message>;
+
+async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
     // Read initial header
-    let initial_header = read.get_next_text().await.expect("failed to get header");
+    let initial_header = reader.get_next_text().await.expect("failed to get header");
     let initial_header: InitialStreamHeader =
         xml_deserialize_from_str(&initial_header).expect("failed to parse header");
 
@@ -46,8 +56,10 @@ async fn accept_connection(stream: TcpStream) {
     let response_header = xml_serialize(response_header);
 
     // Send response header
-    write
+    writer
         .send(Message::Text(response_header))
         .await
         .expect("failed to send hello message");
+
+    Ok(())
 }

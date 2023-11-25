@@ -1,5 +1,7 @@
 use xmlserde_derives::{XmlDeserialize, XmlSerialize};
 
+/// NOTE: This is not a valid stream header, will migrate to minidom or an
+/// equivalent
 #[allow(unused)]
 #[derive(XmlSerialize, XmlDeserialize)]
 #[xmlserde(root = b"stream:stream")]
@@ -32,6 +34,8 @@ impl InitialStreamHeader {
     }
 }
 
+/// NOTE: This is not a valid stream header, will migrate to minidom or an
+/// equivalent
 #[allow(unused)]
 #[derive(XmlSerialize, XmlDeserialize)]
 #[xmlserde(root = b"stream:stream")]
@@ -50,4 +54,38 @@ pub struct ResponseStreamHeader {
     pub xmlns: String,
     #[xmlserde(name = b"xmlns:stream", ty = "attr")]
     pub xmlns_stream: String,
+}
+
+#[derive(XmlSerialize, XmlDeserialize)]
+#[xmlserde(root = b"stream:features")]
+pub struct StreamFeatures {
+    #[xmlserde(name=b"starttls", ty="child")]
+    pub start_tls: Option<StartTls>,
+    #[xmlserde(name=b"mechanisms", ty="child")]
+    pub mechanisms: Option<Mechanisms>
+}
+
+#[derive(XmlSerialize, XmlDeserialize)]
+pub struct StartTls {
+    #[xmlserde(name=b"xmlns", ty = "attr")]
+    pub xmlns: String,
+    #[xmlserde(name=b"required", ty="child")]
+    pub required: Option<StartTlsRequired>
+}
+
+#[derive(XmlSerialize, XmlDeserialize)]
+pub struct StartTlsRequired();
+
+#[derive(XmlSerialize, XmlDeserialize)]
+pub struct Mechanisms {
+    #[xmlserde(name=b"xmlns", ty = "attr")]
+    pub xmlns: String,
+    #[xmlserde(name=b"mechanism", ty="child")]
+    pub mechanisms: Vec<Mechanism>
+}
+
+#[derive(XmlSerialize, XmlDeserialize)]
+pub struct Mechanism {
+    #[xmlserde(ty="text")]
+    pub value: String
 }
