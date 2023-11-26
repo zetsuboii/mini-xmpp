@@ -3,7 +3,7 @@ use xmlserde_derives::{XmlDeserialize, XmlSerialize};
 /// NOTE: This is not a valid stream header, will migrate to minidom or an
 /// equivalent
 #[allow(unused)]
-#[derive(XmlSerialize, XmlDeserialize)]
+#[derive(XmlSerialize, XmlDeserialize, Clone)]
 #[xmlserde(root = b"stream:stream")]
 pub struct InitialStreamHeader {
     #[xmlserde(name = b"from", ty = "attr")]
@@ -66,6 +66,7 @@ pub struct StreamFeatures {
 }
 
 #[derive(XmlSerialize, XmlDeserialize)]
+#[xmlserde(root = b"starttls")]
 pub struct StartTls {
     #[xmlserde(name=b"xmlns", ty = "attr")]
     pub xmlns: String,
@@ -75,6 +76,14 @@ pub struct StartTls {
 
 #[derive(XmlSerialize, XmlDeserialize)]
 pub struct StartTlsRequired();
+
+#[derive(XmlSerialize, XmlDeserialize)]
+#[xmlserde(root = b"proceed")]
+pub struct StartTlsProceed();
+
+#[derive(XmlSerialize, XmlDeserialize)]
+#[xmlserde(root = b"failure")]
+pub struct StartTlsFailure();
 
 #[derive(XmlSerialize, XmlDeserialize)]
 pub struct Mechanisms {

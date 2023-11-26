@@ -9,11 +9,11 @@ use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
-    echo_server().await;
+    run_server().await;
 }
 
-async fn echo_server() {
-    println!(":: websocket echo server ::");
+async fn run_server() {
+    println!(":: websocket server ::");
     let address = "127.0.0.1:9292";
 
     let tcp_socket = TcpListener::bind(address).await.expect("Failed to bind");
@@ -39,6 +39,17 @@ async fn accept_connection(stream: TcpStream) {
     let (mut writer, mut reader) = ws_stream.split();
 
     handshake(&mut reader, &mut writer).await.unwrap();
+
+    while let Some(message) = reader.get_next_text().await {
+        println!("< {}", message);
+
+        writer
+            .send(Message::Text("ack".to_string()))
+            .await
+            .expect("failed to send ack");
+
+        println!("> ack");
+    }
 }
 
 type Reader = SplitStream<WebSocketStream<TcpStream>>;
@@ -52,7 +63,8 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
 
     // Append id to header
     let id = "++123456789++".to_string();
-    let response_header = initial_header.into_response(id);
+    let mut response_header = initial_header.into_response(id);
+    response_header.xmlns = "jabber:server".to_string();
     let response_header = xml_serialize(response_header);
 
     // Send response header
@@ -61,5 +73,51 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
         .await
         .expect("failed to send hello message");
 
+    // Send features header
+    let features = StreamFeatures {
+        mechanisms: Some(Mechanisms {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-sasl".to_string(),
+            mechanisms: vec![Mechanism {
+                value: "PLAIN".to_string(),
+            }],
+        }),
+        start_tls: Some(StartTls {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
+            required: Some(StartTlsRequired()),
+        }),
+    };
+    let features = xml_serialize(features);
+    writer
+        .send(Message::Text(features))
+        .await
+        .expect("failed to send features");
+
+    // Get features back and send proceed message
+    let tls_response = reader
+        .get_next_text()
+        .await
+        .expect("failed to get tls response");
+    xml_deserialize_from_str::<StartTls>(&tls_response).expect("failed to parse tls response");
+
+    let tls_proceed = xml_serialize(StartTlsProceed());
+    writer
+        .send(Message::Text(tls_proceed))
+        .await
+        .expect("failed to send proceed message");
+
+    // Start connection again
+    let initial_header = reader.get_next_text().await.expect("failed to get header");
+    let initial_header: InitialStreamHeader =
+        xml_deserialize_from_str(&initial_header).expect("failed to parse header");
+    let id = "++98765321++".to_string();
+    let mut response_header = initial_header.into_response(id);
+    response_header.xmlns = "jabber:server".to_string();
+    let response_header = xml_serialize(response_header);
+    writer
+        .send(Message::Text(response_header))
+        .await
+        .expect("failed to send hello message");
+
+    println!("handshake done");
     Ok(())
 }
