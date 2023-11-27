@@ -20,7 +20,7 @@ cargo run --bin server
 
 ## Roadmap
 - [X] XMPP handshake
-- [ ] Switch to minidom crate for valid XML
+- [X] Switch to minidom crate for valid XML (used quick-xml instead)
 - [ ] XMPP Messaging
 - [ ] Friends list
 - [ ] P2P connections with [XEP 1074](https://xmpp.org/extensions/xep-0174.html)
