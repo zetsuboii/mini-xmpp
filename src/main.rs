@@ -1,5 +1,4 @@
 use mini_jabber::*;
-use xmlserde::xml_serialize;
 
 // Using this as a playground
 fn main() {
@@ -9,13 +8,13 @@ fn main() {
             Mechanisms {
                 xmlns: "hello".to_string(),
                 mechanisms: vec![
-                    Mechanism { value: "PLAIN".to_string() },
-                    Mechanism { value: "SCRAM-SHA-1".to_string() }
+                    Mechanism("PLAIN".into()),
+                    Mechanism("SCRAM-SHA-1".into()),
                 ]
             }
         )
     };
 
-    let result = xml_serialize(features);
+    let result = features.into_string();
     println!("result: {result}");
 }

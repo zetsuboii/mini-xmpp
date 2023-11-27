@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 
+use color_eyre::eyre;
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -7,7 +8,6 @@ use futures_util::{
 use mini_jabber::*;
 use tokio::{io::AsyncReadExt, net::TcpStream};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
@@ -68,7 +68,7 @@ type Writer = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
     let mut state = HandshakeState::Header;
 
-    let initial_header = InitialStreamHeader {
+    let initial_header = StreamHeader {
         from: "zet@mail.com".to_string(),
         to: "su@mail.com".to_string(),
         version: "1.0".to_string(),
@@ -81,8 +81,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
         match state {
             HandshakeState::Header => {
                 // Send initial header
-                let serialized_header = xml_serialize(initial_header.clone());
-                println!("sending initial header");
+                let serialized_header = initial_header.into_string();
                 writer
                     .send(Message::Text(serialized_header))
                     .await
@@ -92,9 +91,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     .get_next_text()
                     .await
                     .expect("failed to get response");
-                let response_header: ResponseStreamHeader =
-                    xml_deserialize_from_str(&response_header).expect("failed to parse header");
-                println!("got id: {}", response_header.id);
+                let response_header = StreamHeaderResponse::from_string(&response_header)
+                    .expect("failed to get response");
+                println!("got initial id: {}", response_header.id);
 
                 state = HandshakeState::Features;
             }
@@ -103,8 +102,8 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     .get_next_text()
                     .await
                     .expect("failed to get features");
-                let features: StreamFeatures =
-                    xml_deserialize_from_str(&features).expect("failed to parse features");
+                let features =
+                    StreamFeatures::from_string(&features).expect("failed to parse features");
 
                 // If features are empty, negotiation is over
                 if features.mechanisms.is_none() && features.start_tls.is_none() {
@@ -117,19 +116,19 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     features.mechanisms.map(|ms| {
                         ms.mechanisms
                             .into_iter()
-                            .map(|m| m.value)
+                            .map(|m| m.0)
                             .collect::<Vec<String>>()
                     })
                 );
 
                 if let Some(tls) = features.start_tls {
-                    if tls.required.is_some() {
+                    if tls.required {
                         // Negotiate for TLS
                         let tls_feature = StartTls {
                             xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
-                            required: None,
-                        };
-                        let tls_feature = xml_serialize(tls_feature);
+                            required: false,
+                        }
+                        .into_string();
                         writer
                             .send(Message::Text(tls_feature))
                             .await
@@ -139,8 +138,16 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                             .get_next_text()
                             .await
                             .expect("failed to get response");
-                        xml_deserialize_from_str::<StartTlsProceed>(&tls_response)
-                            .expect("negotiation failed");
+
+                        match StartTlsResponse::from_string(&tls_response) {
+                            Ok(StartTlsResponse::Proceed(_)) => {}
+                            Ok(StartTlsResponse::Failure(_)) => {
+                                eyre::bail!("tls response failed")
+                            }
+                            Err(_) => {
+                                eyre::bail!("failed to parse response")
+                            }
+                        }
                     }
                 }
 
@@ -148,7 +155,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
             }
             HandshakeState::Done => {
                 // Reset connection by sending the header again
-                let serialized_header = xml_serialize(initial_header.clone());
+                let serialized_header = initial_header.into_string();
                 writer
                     .send(Message::Text(serialized_header))
                     .await
@@ -158,8 +165,8 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     .get_next_text()
                     .await
                     .expect("failed to get response");
-                let response_header: ResponseStreamHeader =
-                    xml_deserialize_from_str(&response_header).expect("failed to parse header");
+                let response_header = StreamHeaderResponse::from_string(&response_header)
+                    .expect("failed to parse header");
                 println!("new id: {}", response_header.id);
                 println!("handshake done");
                 return Ok(());

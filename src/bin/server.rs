@@ -5,7 +5,6 @@ use futures_util::{
 use mini_jabber::*;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
-use xmlserde::{xml_deserialize_from_str, xml_serialize};
 
 #[tokio::main]
 async fn main() {
@@ -58,14 +57,14 @@ type Writer = SplitSink<WebSocketStream<TcpStream>, Message>;
 async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
     // Read initial header
     let initial_header = reader.get_next_text().await.expect("failed to get header");
-    let initial_header: InitialStreamHeader =
-        xml_deserialize_from_str(&initial_header).expect("failed to parse header");
+    let initial_header =
+        StreamHeader::from_string(&initial_header).expect("failed to parse header");
 
     // Append id to header
     let id = "++123456789++".to_string();
     let mut response_header = initial_header.into_response(id);
     response_header.xmlns = "jabber:server".to_string();
-    let response_header = xml_serialize(response_header);
+    let response_header = response_header.into_string();
 
     // Send response header
     writer
@@ -77,16 +76,14 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
     let features = StreamFeatures {
         mechanisms: Some(Mechanisms {
             xmlns: "urn:ietf:params:xml:ns:xmpp-sasl".to_string(),
-            mechanisms: vec![Mechanism {
-                value: "PLAIN".to_string(),
-            }],
+            mechanisms: vec![Mechanism("PLAIN".into())],
         }),
         start_tls: Some(StartTls {
             xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
-            required: Some(StartTlsRequired()),
+            required: true,
         }),
     };
-    let features = xml_serialize(features);
+    let features = features.into_string();
     writer
         .send(Message::Text(features))
         .await
@@ -97,9 +94,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
         .get_next_text()
         .await
         .expect("failed to get tls response");
-    xml_deserialize_from_str::<StartTls>(&tls_response).expect("failed to parse tls response");
+    StartTls::from_string(&tls_response).expect("failed to parse tls repsonse");
 
-    let tls_proceed = xml_serialize(StartTlsProceed());
+    let tls_proceed = StartTlsProceed().into_string();
     writer
         .send(Message::Text(tls_proceed))
         .await
@@ -107,12 +104,11 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
 
     // Start connection again
     let initial_header = reader.get_next_text().await.expect("failed to get header");
-    let initial_header: InitialStreamHeader =
-        xml_deserialize_from_str(&initial_header).expect("failed to parse header");
+    let initial_header =  StreamHeader::from_string(&initial_header).expect("failed to parse header");
     let id = "++98765321++".to_string();
     let mut response_header = initial_header.into_response(id);
     response_header.xmlns = "jabber:server".to_string();
-    let response_header = xml_serialize(response_header);
+    let response_header = response_header.into_string();
     writer
         .send(Message::Text(response_header))
         .await
