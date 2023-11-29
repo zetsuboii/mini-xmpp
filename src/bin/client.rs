@@ -41,9 +41,19 @@ async fn run_client() {
                 .read_line(&mut user_input)
                 .expect("failed to read to string");
 
+            while user_input.ends_with("\n") {
+                user_input.truncate(user_input.len() - 1);
+            }
+
             // Send user input
+            let message = Stanza::Message(StanzaMessage {
+                to: "some@im.com".to_string(),
+                body: user_input,
+            })
+            .into_string();
+
             writer
-                .send(Message::Text(user_input.trim_end().to_string()))
+                .send(Message::Text(message))
                 .await
                 .expect("failed to send message");
 

@@ -6,6 +6,8 @@ use quick_xml::{
     Reader, Writer,
 };
 
+use crate::Collect;
+
 use super::serialize::{XmlCustomDeserialize, XmlCustomSerialize};
 
 pub struct StreamHeader {
@@ -30,9 +32,7 @@ impl XmlCustomSerialize for StreamHeader {
         stream_header.push_attribute(("xmlns:stream", self.xmlns_stream.as_str()));
 
         writer.write_event(Event::Start(stream_header)).unwrap();
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 
@@ -131,9 +131,7 @@ impl XmlCustomSerialize for StreamHeaderResponse {
         stream_header.push_attribute(("xmlns:stream", self.xmlns_stream.as_str()));
 
         writer.write_event(Event::Start(stream_header)).unwrap();
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 
@@ -218,9 +216,7 @@ impl XmlCustomSerialize for StreamFeatures {
             writer
                 .write_event(Event::Empty(stream_features_start))
                 .unwrap();
-            return std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-                .unwrap()
-                .to_string();
+            return writer.collect();
         }
 
         // <stream:features>
@@ -277,9 +273,7 @@ impl XmlCustomSerialize for StreamFeatures {
         writer
             .write_event(Event::End(BytesEnd::new("stream:features")))
             .unwrap();
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 
@@ -424,9 +418,7 @@ impl XmlCustomSerialize for StartTls {
             writer.write_event(Event::Empty(start_tls_start)).unwrap();
         }
 
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 
@@ -512,10 +504,7 @@ impl XmlCustomSerialize for StartTlsProceed {
         writer
             .write_event(Event::Empty(BytesStart::new("proceed")))
             .unwrap();
-
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 
@@ -527,10 +516,7 @@ impl XmlCustomSerialize for StartTlsFailure {
         writer
             .write_event(Event::Empty(BytesStart::new("failure")))
             .unwrap();
-
-        std::str::from_utf8(writer.into_inner().into_inner().as_slice())
-            .unwrap()
-            .to_string()
+        writer.collect()
     }
 }
 

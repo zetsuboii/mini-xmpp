@@ -39,8 +39,17 @@ async fn accept_connection(stream: TcpStream) {
 
     handshake(&mut reader, &mut writer).await.unwrap();
 
-    while let Some(message) = reader.get_next_text().await {
-        println!("< {}", message);
+    while let Some(raw_stanza) = reader.get_next_text().await {
+        // Try to parse stanza
+        let stanza = Stanza::from_string(raw_stanza.as_ref()).expect("failed to parse stanza");
+
+        match stanza {
+            Stanza::Message(message) => {
+                println!("< (Message) to={} body={} [{addr}]", message.to, message.body)
+            }
+            Stanza::Iq => println!("< (IQ) [{addr}]"),
+            Stanza::Presence => println!("< (Presence) [{addr}]"),
+        }
 
         writer
             .send(Message::Text("ack".to_string()))
@@ -104,7 +113,8 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
 
     // Start connection again
     let initial_header = reader.get_next_text().await.expect("failed to get header");
-    let initial_header =  StreamHeader::from_string(&initial_header).expect("failed to parse header");
+    let initial_header =
+        StreamHeader::from_string(&initial_header).expect("failed to parse header");
     let id = "++98765321++".to_string();
     let mut response_header = initial_header.into_response(id);
     response_header.xmlns = "jabber:server".to_string();
