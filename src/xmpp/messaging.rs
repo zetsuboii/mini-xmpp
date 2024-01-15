@@ -19,6 +19,7 @@ fn get_attr_or_panic(tag: &BytesStart, attribute: &'static str) -> String {
     .expect(&format!("attribute {attribute} not found"))
 }
 
+#[derive(Debug)]
 pub enum Stanza {
     Message(StanzaMessage),
     Presence,
@@ -67,47 +68,55 @@ impl XmlCustomSerialize for Stanza {
 
                 match iq_inner {
                     StanzaIqPayload::Bind(payload) => {
-                        // <bind>
-                        writer
-                            .write_event(Event::Start(BytesStart::new("bind")))
-                            .unwrap();
+                        // <bind xmlns={...} >
+                        let mut bind_start = BytesStart::new("bind");
+                        bind_start.push_attribute(("xmlns", payload.xmlns.as_ref()));
 
-                        if let Some(resource) = &payload.resource {
-                            // <resource>
+                        if payload.resource.is_none() && payload.jid.is_none() {
+                            writer.write_event(Event::Empty(bind_start)).unwrap();
+                        } else {
+                            writer.write_event(Event::Start(bind_start)).unwrap();
+
+                            if let Some(resource) = &payload.resource {
+                                // <resource>
+                                writer
+                                    .write_event(Event::Start(BytesStart::new("resource")))
+                                    .unwrap();
+                                // {...}
+                                writer
+                                    .write_event(Event::Text(BytesText::new(resource.as_ref())))
+                                    .unwrap();
+                                // </resource>
+                                writer
+                                    .write_event(Event::End(BytesEnd::new("resource")))
+                                    .unwrap();
+                            }
+
+                            if let Some(jid) = &payload.jid {
+                                // <jid>
+                                writer
+                                    .write_event(Event::Start(BytesStart::new("jid")))
+                                    .unwrap();
+                                // {...}
+                                writer
+                                    .write_event(Event::Text(BytesText::new(jid.as_ref())))
+                                    .unwrap();
+                                // </jid>
+                                writer
+                                    .write_event(Event::End(BytesEnd::new("jid")))
+                                    .unwrap();
+                            }
+                            // </bind>
                             writer
-                                .write_event(Event::Start(BytesStart::new("resource")))
-                                .unwrap();
-                            // {...}
-                            writer
-                                .write_event(Event::Text(BytesText::new(resource.as_ref())))
-                                .unwrap();
-                            // </resource>
-                            writer
-                                .write_event(Event::End(BytesEnd::new("resource")))
+                                .write_event(Event::End(BytesEnd::new("bind")))
                                 .unwrap();
                         }
-
-                        if let Some(jid) = &payload.jid {
-                            // <jid>
-                            writer
-                                .write_event(Event::Start(BytesStart::new("jid")))
-                                .unwrap();
-                            // {...}
-                            writer
-                                .write_event(Event::Text(BytesText::new(jid.as_ref())))
-                                .unwrap();
-                            // </jid>
-                            writer
-                                .write_event(Event::End(BytesEnd::new("jid")))
-                                .unwrap();
-                        }
-                        // </bind>
-                        writer
-                            .write_event(Event::End(BytesEnd::new("bind")))
-                            .unwrap();
                     }
                 }
+
                 // </iq>
+                let iq_end = BytesEnd::new("iq");
+                writer.write_event(Event::End(iq_end)).unwrap();
             }
             Self::Presence => {
                 todo!()
@@ -156,12 +165,33 @@ impl XmlCustomDeserialize for Stanza {
 
                     while let Ok(payload_event) = reader.read_event() {
                         match payload_event {
+                            Event::Empty(tag) => {
+                                let xmlns = tag
+                                    .try_get_attribute("xmlns")
+                                    .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
+
+                                iq_payload = Some(StanzaIqPayload::Bind(IqBindPayload {
+                                    xmlns,
+                                    jid: None,
+                                    resource: None,
+                                }));
+                            }
                             Event::Start(tag) => match tag.name().as_ref() {
                                 b"bind" => {
+                                    let xmlns = tag
+                                        .try_get_attribute("xmlns")
+                                        .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                        .map(|attr| attr.value)
+                                        .map(|value| String::from_utf8(value.into()))??;
+
                                     let mut bind_payload = IqBindPayload {
+                                        xmlns,
                                         jid: None,
                                         resource: None,
                                     };
+
                                     while let Ok(bind_event) = reader.read_event() {
                                         match bind_event {
                                             Event::Start(tag) => {
@@ -222,22 +252,27 @@ impl XmlCustomDeserialize for Stanza {
     }
 }
 
+#[derive(Debug)]
 pub struct StanzaMessage {
     pub to: String,
     pub body: String,
 }
 
+#[derive(Debug)]
 pub struct StanzaIq {
     pub iq_type: String,
     pub iq_id: String,
     pub iq_payload: StanzaIqPayload,
 }
 
+#[derive(Debug)]
 pub enum StanzaIqPayload {
     Bind(IqBindPayload),
 }
 
+#[derive(Debug)]
 pub struct IqBindPayload {
+    pub xmlns: String,
     pub jid: Option<String>,
     pub resource: Option<String>,
 }

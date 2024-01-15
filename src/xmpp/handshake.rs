@@ -196,6 +196,7 @@ impl XmlCustomDeserialize for StreamHeaderResponse {
     }
 }
 
+#[derive(Debug)]
 pub struct StreamFeatures {
     pub start_tls: Option<StartTls>,
     pub mechanisms: Option<Mechanisms>,
@@ -204,7 +205,7 @@ pub struct StreamFeatures {
 
 impl StreamFeatures {
     pub fn empty(&self) -> bool {
-        self.start_tls.is_none() && self.mechanisms.is_none()
+        self.start_tls.is_none() && self.mechanisms.is_none() && self.bind.is_none()
     }
 }
 
@@ -418,6 +419,7 @@ impl XmlCustomDeserialize for StreamFeatures {
     }
 }
 
+#[derive(Debug)]
 pub struct StartTls {
     pub xmlns: String,
     pub required: bool,
@@ -545,13 +547,16 @@ impl XmlCustomSerialize for StartTlsFailure {
     }
 }
 
+#[derive(Debug)]
 pub struct Mechanisms {
     pub xmlns: String,
     pub mechanisms: Vec<Mechanism>,
 }
 
+#[derive(Debug)]
 pub struct Mechanism(pub String);
 
+#[derive(Debug)]
 pub struct Bind {
     pub xmlns: String,
 }

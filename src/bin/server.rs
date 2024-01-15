@@ -115,13 +115,13 @@ async fn handshake(
     let authentication =
         Authentication::from_string(&authentication).expect("failed to parse authentication");
     let credentials = Credentials::deserialize(authentication.value);
-    let valid = check_credentials(credentials, &mut db_conn)
+    let valid = check_credentials(&credentials, &mut db_conn)
         .await
         .expect("failed checking credentials");
-
     if !valid {
         eyre::bail!("failed authentication")
     }
+    let jid = credentials.username;
 
     let success =
         AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).into_string();
@@ -129,7 +129,6 @@ async fn handshake(
         .send(Message::Text(success))
         .await
         .expect("failed to send success message");
-    println!("sent success");
 
     reset_connection(reader, writer)
         .await
@@ -147,11 +146,17 @@ async fn handshake(
         .await
         .expect("failed to negotiate");
 
+    // After sending features, client will ask for a resource and server has to
+    // generate it
+    generate_resource(reader, writer, jid)
+        .await
+        .expect("failed to generate resource");
+
     Ok(())
 }
 
 async fn check_credentials(
-    credentials: Credentials,
+    credentials: &Credentials,
     db_conn: &mut PoolConnection<sqlx::Sqlite>,
 ) -> eyre::Result<bool> {
     // Check if user exists
@@ -197,6 +202,39 @@ async fn negotiate_features(
             writer.send(Message::Text(tls_proceed)).await?;
         }
     }
+
+    Ok(())
+}
+
+async fn generate_resource(
+    reader: &mut Reader,
+    writer: &mut Writer,
+    jid: String,
+) -> eyre::Result<()> {
+    let next = reader
+        .get_next_text()
+        .await
+        .ok_or(eyre::eyre!("failed to get bind request"))?;
+
+    let bind_request = match Stanza::from_string(next.as_ref())? {
+        Stanza::Iq(iq) => iq,
+        _ => eyre::bail!("invalid bind request"),
+    };
+
+    let resource = Uuid::new_v4().to_string();
+    let bind_response = Stanza::Iq(StanzaIq {
+        iq_id: bind_request.iq_id,
+        iq_type: "result".to_string(),
+        iq_payload: StanzaIqPayload::Bind(IqBindPayload {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+            jid: Some(format!("{jid}/{resource}")),
+            resource: None,
+        }),
+    });
+
+    writer
+        .send(Message::Text(bind_response.into_string()))
+        .await?;
 
     Ok(())
 }

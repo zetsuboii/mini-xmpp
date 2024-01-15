@@ -8,6 +8,7 @@ use futures_util::{
 use mini_jabber::*;
 use tokio::{io::AsyncReadExt, net::TcpStream};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -190,7 +191,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     .expect("failed to reset connection");
                 println!("connection reset: {conn_id}");
 
-                bind_resource(reader).await.expect("failed to bind resource");
+                bind_resource(reader, writer)
+                    .await
+                    .expect("failed to bind resource");
                 state = HandshakeState::Done;
             }
             HandshakeState::Done => {
@@ -227,16 +230,40 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
     Ok(response_head.id)
 }
 
-async fn bind_resource(reader: &mut Reader) -> eyre::Result<()> {
+async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
     // Check if bind is given inside
     let features = reader
         .get_next_text()
         .await
-        .expect("failed to get features");
-    let features = StreamFeatures::from_string(&features).expect("failed to parse features");
+        .ok_or(eyre::eyre!("failed to get features"))?;
+    let features = StreamFeatures::from_string(&features)?;
     features.bind.expect("bind options not found");
-    
 
+    // Send Iq that includes bind request, server will assign the resource
+    let iq = StanzaIq {
+        iq_id: Uuid::new_v4().to_string(),
+        iq_type: "set".to_string(),
+        iq_payload: StanzaIqPayload::Bind(IqBindPayload {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+            jid: None,
+            resource: None,
+        }),
+    };
+    writer
+        .send(Message::Text(Stanza::Iq(iq).into_string()))
+        .await?;
+
+    // Get the Iq that has resource assigned
+    let iq_response = reader
+        .get_next_text()
+        .await
+        .ok_or(eyre::eyre!("failed to get iq response"))?;
+
+    let iq_response = match Stanza::from_string(&iq_response)? {
+        Stanza::Iq(iq) => iq,
+        _ => unreachable!("invalid iq"),
+    };
+    println!("new resource: {:?}", iq_response.iq_payload);
 
     Ok(())
 }
