@@ -18,10 +18,27 @@ cargo run --bin client
 cargo run --bin server
 ```
 
+## SQLX Cook Book
+```bash
+# Install sqlx-cli
+cargo install sqlx-cli
+
+echo "DATABASE_URL=sqlite:jabber.sqlite" > .env
+
+# Create a database
+sqlx database create
+
+# Run migrations
+sqlx migrate run
+```
+
 ## Roadmap
 - [X] XMPP handshake
 - [X] Switch to minidom crate for valid XML (used quick-xml instead)
-- [ ] XMPP Messaging
+- [X] XMPP Messaging
+- [X] Authentication
+- [ ] Resource binding
+- [ ] Message delivery
 - [ ] Friends list
 - [ ] P2P connections with [XEP 1074](https://xmpp.org/extensions/xep-0174.html)
 - [ ] Companion mobile and CLI apps

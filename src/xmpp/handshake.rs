@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use base64::{prelude::BASE64_STANDARD as BASE64, Engine};
 use color_eyre::eyre;
 use quick_xml::{
     events::{BytesEnd, BytesStart, BytesText, Event},
@@ -526,3 +527,167 @@ pub struct Mechanisms {
 }
 
 pub struct Mechanism(pub String);
+
+pub struct Authentication {
+    pub xmlns: String,
+    pub mechanism: Mechanism,
+    pub value: String,
+}
+
+impl Authentication {
+    pub fn new(xmlns: String, mechanism: Mechanism, value: String) -> Self {
+        Self {
+            xmlns,
+            mechanism,
+            value,
+        }
+    }
+
+    pub fn deserialize_credentials(&self) -> Credentials {
+        let value = BASE64.decode(self.value.as_bytes()).unwrap();
+        let value = std::str::from_utf8(&value).unwrap();
+        let value = value.split("\0").collect::<Vec<&str>>();
+        Credentials::new(value[1].to_string(), value[2].to_string())
+    }
+}
+
+impl XmlCustomDeserialize for Authentication {
+    fn from_string(value: &str) -> eyre::Result<Self> {
+        let mut reader = Reader::from_str(value);
+
+        let mut xmlns: Option<String> = None;
+        let mut mechanism: Option<Mechanism> = None;
+        let mut value: Option<String> = None;
+
+        while let Ok(event) = reader.read_event() {
+            match event {
+                Event::Start(e) => {
+                    let name = e.name();
+                    match name.as_ref() {
+                        b"auth" => {
+                            xmlns = Some(
+                                std::str::from_utf8(
+                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
+                                )
+                                .unwrap()
+                                .to_string(),
+                            );
+                            mechanism = Some(Mechanism(
+                                std::str::from_utf8(
+                                    &e.try_get_attribute("mechanism").unwrap().unwrap().value,
+                                )
+                                .unwrap()
+                                .to_string(),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                Event::Text(text) => {
+                    value = Some(std::str::from_utf8(&text).unwrap().to_string());
+                }
+                Event::End(_) => break,
+                _ => {}
+            }
+        }
+
+        Ok(Authentication {
+            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?,
+            mechanism: mechanism.ok_or(eyre::eyre!("mechanism"))?,
+            value: value.unwrap(),
+        })
+    }
+}
+
+impl XmlCustomSerialize for Authentication {
+    fn into_string(&self) -> String {
+        let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
+        // <auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="PLAIN">
+        let mut auth_start = BytesStart::new("auth");
+        auth_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+        auth_start.push_attribute(("mechanism", self.mechanism.0.as_ref()));
+
+        // {...}
+        writer.write_event(Event::Start(auth_start)).unwrap();
+        writer
+            .write_event(Event::Text(BytesText::new(self.value.as_ref())))
+            .unwrap();
+
+        // </auth>
+        writer
+            .write_event(Event::End(BytesEnd::new("auth")))
+            .unwrap();
+        writer.collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl Credentials {
+    pub fn new(username: String, password: String) -> Self {
+        Self { username, password }
+    }
+
+    pub fn deserialize(value: String) -> Self {
+        let value = BASE64.decode(value.as_bytes()).unwrap();
+        let value = std::str::from_utf8(&value).unwrap();
+        let value = value.split("\0").collect::<Vec<&str>>();
+        Self::new(value[0].to_string(), value[1].to_string())
+    }
+
+    pub fn serialize(&self) -> String {
+        let mut serialized = String::new();
+        serialized.push_str(&self.username.as_str());
+        serialized.push('\0');
+        serialized.push_str(&self.password.as_str());
+        BASE64.encode(serialized)
+    }
+}
+
+pub struct AuthenticationSuccess {
+    pub xmlns: String,
+}
+
+impl AuthenticationSuccess {
+    pub fn new(xmlns: String) -> Self { Self { xmlns } }
+}
+
+impl XmlCustomDeserialize for AuthenticationSuccess {
+    fn from_string(value: &str) -> eyre::Result<Self> {
+        let mut reader = Reader::from_str(value);
+        let mut xmlns: Option<String> = None;
+
+        while let Ok(event) = reader.read_event() {
+            match event {
+                Event::Empty(e) => {
+                    xmlns = Some(
+                        std::str::from_utf8(&e.try_get_attribute("xmlns").unwrap().unwrap().value)
+                            .unwrap()
+                            .to_string(),
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(AuthenticationSuccess {
+            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?
+        })
+    }
+}
+
+impl XmlCustomSerialize for AuthenticationSuccess {
+    fn into_string(&self) -> String {
+        let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
+        // <success xmlns="urn:ietf:params:xml:ns:xmpp-sasl" />
+        let mut success_start = BytesStart::new("success");
+        success_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+        writer.write_event(Event::Empty(success_start)).unwrap();
+        writer.collect() 
+    }
+}

@@ -1,10 +1,14 @@
+use color_eyre::eyre;
+use dotenvy::dotenv;
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use mini_jabber::*;
+use sqlx::pool::PoolConnection;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -12,6 +16,8 @@ async fn main() {
 }
 
 async fn run_server() {
+    dotenv().expect(".env");
+
     println!(":: websocket server ::");
     let address = "127.0.0.1:9292";
 
@@ -24,6 +30,10 @@ async fn run_server() {
 }
 
 async fn accept_connection(stream: TcpStream) {
+    let pool = sqlx::SqlitePool::connect(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+
     let addr = stream
         .peer_addr()
         .expect("connected streams should have a peer address");
@@ -37,7 +47,7 @@ async fn accept_connection(stream: TcpStream) {
 
     let (mut writer, mut reader) = ws_stream.split();
 
-    handshake(&mut reader, &mut writer).await.unwrap();
+    handshake(&mut reader, &mut writer, &pool).await.unwrap();
 
     while let Some(raw_stanza) = reader.get_next_text().await {
         // Try to parse stanza
@@ -45,9 +55,12 @@ async fn accept_connection(stream: TcpStream) {
 
         match stanza {
             Stanza::Message(message) => {
-                println!("< (Message) to={} body={} [{addr}]", message.to, message.body)
+                println!(
+                    "< (Message) to={} body={} [{addr}]",
+                    message.to, message.body
+                )
             }
-            Stanza::Iq => println!("< (IQ) [{addr}]"),
+            Stanza::Iq(_) => println!("< (IQ) [{addr}]"),
             Stanza::Presence => println!("< (Presence) [{addr}]"),
         }
 
@@ -63,25 +76,17 @@ async fn accept_connection(stream: TcpStream) {
 type Reader = SplitStream<WebSocketStream<TcpStream>>;
 type Writer = SplitSink<WebSocketStream<TcpStream>, Message>;
 
-async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
-    // Read initial header
-    let initial_header = reader.get_next_text().await.expect("failed to get header");
-    let initial_header =
-        StreamHeader::from_string(&initial_header).expect("failed to parse header");
+async fn handshake(
+    reader: &mut Reader,
+    writer: &mut Writer,
+    pool: &sqlx::SqlitePool,
+) -> color_eyre::Result<()> {
+    let mut db_conn = pool.acquire().await?;
 
-    // Append id to header
-    let id = "++123456789++".to_string();
-    let mut response_header = initial_header.into_response(id);
-    response_header.xmlns = "jabber:server".to_string();
-    let response_header = response_header.into_string();
-
-    // Send response header
-    writer
-        .send(Message::Text(response_header))
+    reset_connection(reader, writer)
         .await
-        .expect("failed to send hello message");
+        .expect("failed to reset connection");
 
-    // Send features header
     let features = StreamFeatures {
         mechanisms: Some(Mechanisms {
             xmlns: "urn:ietf:params:xml:ns:xmpp-sasl".to_string(),
@@ -92,38 +97,108 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
             required: true,
         }),
     };
-    let features = features.into_string();
-    writer
-        .send(Message::Text(features))
+    negotiate_features(features, reader, writer)
         .await
-        .expect("failed to send features");
+        .expect("failed to negotitate");
 
-    // Get features back and send proceed message
-    let tls_response = reader
+    reset_connection(reader, writer)
+        .await
+        .expect("failed to reset connection");
+
+    // Authenticate
+    let authentication = reader
         .get_next_text()
         .await
-        .expect("failed to get tls response");
-    StartTls::from_string(&tls_response).expect("failed to parse tls repsonse");
+        .expect("failed to get authentication");
 
-    let tls_proceed = StartTlsProceed().into_string();
-    writer
-        .send(Message::Text(tls_proceed))
+    let authentication =
+        Authentication::from_string(&authentication).expect("failed to parse authentication");
+    let credentials = Credentials::deserialize(authentication.value);
+    let valid = check_credentials(credentials, &mut db_conn)
         .await
-        .expect("failed to send proceed message");
+        .expect("failed checking credentials");
 
-    // Start connection again
-    let initial_header = reader.get_next_text().await.expect("failed to get header");
-    let initial_header =
-        StreamHeader::from_string(&initial_header).expect("failed to parse header");
-    let id = "++98765321++".to_string();
-    let mut response_header = initial_header.into_response(id);
-    response_header.xmlns = "jabber:server".to_string();
-    let response_header = response_header.into_string();
+    if !valid {
+        eyre::bail!("failed authentication")
+    }
+
+    let success =
+        AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).into_string();
     writer
-        .send(Message::Text(response_header))
+        .send(Message::Text(success))
         .await
-        .expect("failed to send hello message");
+        .expect("failed to send success message");
+    println!("sent success");
 
-    println!("handshake done");
+    reset_connection(reader, writer)
+        .await
+        .expect("failed to reset connection");
+    Ok(())
+}
+
+async fn check_credentials(
+    credentials: Credentials,
+    db_conn: &mut PoolConnection<sqlx::Sqlite>,
+) -> eyre::Result<bool> {
+    // Check if user exists
+    let users = sqlx::query!(
+        "SELECT password FROM users WHERE email = $1",
+        credentials.username
+    )
+    .fetch_all(&mut **db_conn)
+    .await?;
+
+    if users.len() == 0 {
+        sqlx::query!(
+            "INSERT INTO users(email, password) VALUES($1, $2)",
+            credentials.username,
+            credentials.password
+        )
+        .execute(&mut **db_conn)
+        .await?;
+        Ok(true)
+    } else {
+        let user = &users[0];
+        Ok(user.password == credentials.password)
+    }
+}
+
+async fn negotiate_features(
+    features: StreamFeatures,
+    reader: &mut Reader,
+    writer: &mut Writer,
+) -> eyre::Result<()> {
+    writer.send(Message::Text(features.into_string())).await?;
+
+    // If TLS is required, negotiate TLS
+    if let Some(tls) = features.start_tls {
+        if tls.required {
+            let next = reader
+                .get_next_text()
+                .await
+                .ok_or(eyre::eyre!("failed to get response"))?;
+            StartTls::from_string(&next)?;
+
+            let tls_proceed = StartTlsProceed().into_string();
+            writer.send(Message::Text(tls_proceed)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
+    let next = reader
+        .get_next_text()
+        .await
+        .ok_or(eyre::eyre!("failed to get header"))?;
+    let stream_head = StreamHeader::from_string(&next)?;
+    let stream_id = Uuid::new_v4().to_string();
+    let response_head = stream_head.into_response(stream_id);
+
+    writer
+        .send(Message::Text(response_head.into_string()))
+        .await?;
+
     Ok(())
 }

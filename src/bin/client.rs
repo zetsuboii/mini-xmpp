@@ -70,6 +70,7 @@ async fn run_client() {
 enum HandshakeState {
     Header,
     Features,
+    Authentication,
     Done,
 }
 
@@ -78,33 +79,11 @@ type Writer = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
     let mut state = HandshakeState::Header;
 
-    let initial_header = StreamHeader {
-        from: "zet@mail.com".to_string(),
-        to: "su@mail.com".to_string(),
-        version: "1.0".to_string(),
-        xml_lang: "en".to_string(),
-        xmlns: "jabber:client".to_string(),
-        xmlns_stream: "http://etherx.jabber.org/streams".to_string(),
-    };
-
     loop {
         match state {
             HandshakeState::Header => {
-                // Send initial header
-                let serialized_header = initial_header.into_string();
-                writer
-                    .send(Message::Text(serialized_header))
-                    .await
-                    .expect("failed to send initial header");
-                // Read response header
-                let response_header = reader
-                    .get_next_text()
-                    .await
-                    .expect("failed to get response");
-                let response_header = StreamHeaderResponse::from_string(&response_header)
-                    .expect("failed to get response");
-                println!("got initial id: {}", response_header.id);
-
+                let conn_id = reset_connection(reader, writer).await.expect("failed to start connection");
+                println!("connection reset: {conn_id}");
                 state = HandshakeState::Features;
             }
             HandshakeState::Features => {
@@ -117,7 +96,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
 
                 // If features are empty, negotiation is over
                 if features.mechanisms.is_none() && features.start_tls.is_none() {
-                    state = HandshakeState::Done;
+                    state = HandshakeState::Authentication;
                     continue;
                 }
 
@@ -161,28 +140,83 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     }
                 }
 
-                state = HandshakeState::Done;
+                state = HandshakeState::Authentication;
             }
-            HandshakeState::Done => {
-                // Reset connection by sending the header again
-                let serialized_header = initial_header.into_string();
+            HandshakeState::Authentication => {
+                let conn_id = reset_connection(reader, writer).await.expect("failed to reset connection");
+                println!("connection reset: {conn_id}");
+
+                // Get credentials from stdin
+                let mut username = String::new();
+                let mut password = String::new();
+                print!("username: ");
+                std::io::stdout().flush().unwrap();
+                std::io::stdin().read_line(&mut username).unwrap();
+                username.pop();
+                print!("password: ");
+                std::io::stdout().flush().unwrap();
+                std::io::stdin().read_line(&mut password).unwrap();
+                password.pop();
+
+                let credentials = Credentials::new(username, password);
+                let authentication = Authentication::new(
+                    "urn:ietf:params:xml:ns:xmpp-sasl".into(),
+                    Mechanism("PLAIN".into()),
+                    credentials.serialize(),
+                )
+                .into_string();
+
                 writer
-                    .send(Message::Text(serialized_header))
+                    .send(Message::Text(authentication))
                     .await
-                    .expect("failed to send initial header");
-                // Read response header
-                let response_header = reader
+                    .expect("failed to authenticate");
+
+                let auth_response = reader
                     .get_next_text()
                     .await
                     .expect("failed to get response");
-                let response_header = StreamHeaderResponse::from_string(&response_header)
-                    .expect("failed to parse header");
-                println!("new id: {}", response_header.id);
-                println!("handshake done");
+
+                AuthenticationSuccess::from_string(&auth_response).expect("failed to authenticate");
+                state = HandshakeState::Done
+            }
+            HandshakeState::Done => {
+                let conn_id = reset_connection(reader, writer).await.expect("failed to reset connection");
+                println!("connection reset: {conn_id}");
                 return Ok(());
             }
         }
     }
+}
+
+async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<String> {
+    let stream_head = StreamHeader {
+        from: "zet@mail.com".to_string(),
+        to: "su@mail.com".to_string(),
+        version: "1.0".to_string(),
+        xml_lang: "en".to_string(),
+        xmlns: "jabber:client".to_string(),
+        xmlns_stream: "http://etherx.jabber.org/streams".to_string(),
+    };
+
+    // Send StreamHeader to server
+    writer
+        .send(Message::Text(stream_head.into_string()))
+        .await?;
+
+    // Get response from the server
+    let next = reader
+        .get_next_text()
+        .await
+        .ok_or(eyre::eyre!("failed to get response"))?;
+
+    let response_head = StreamHeaderResponse::from_string(&next)
+        .map_err(|_| eyre::eyre!("failed to parse header"))?;
+
+    Ok(response_head.id)
+}
+
+async fn bind_resource() -> eyre::Result<()> {
+    Ok(())
 }
 
 // Our helper method which will read data from stdin and send it along the
