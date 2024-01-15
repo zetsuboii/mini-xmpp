@@ -12,7 +12,8 @@ fn main() {
                     Mechanism("SCRAM-SHA-1".into()),
                 ]
             }
-        )
+        ),
+        bind: None
     };
 
     let result = features.into_string();

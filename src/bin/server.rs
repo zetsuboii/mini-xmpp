@@ -1,3 +1,5 @@
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+
 use color_eyre::eyre;
 use dotenvy::dotenv;
 use futures_util::{
@@ -6,9 +8,37 @@ use futures_util::{
 };
 use mini_jabber::*;
 use sqlx::pool::PoolConnection;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::RwLock,
+};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
+
+#[derive(Debug)]
+struct ClientConnection {
+    resource: String,
+    ip: SocketAddr,
+}
+
+impl ClientConnection {
+    fn new(resource: String, ip: SocketAddr) -> Self {
+        Self { resource, ip }
+    }
+
+    fn resource(&self) -> &str {
+        self.resource.as_ref()
+    }
+
+    fn ip(&self) -> SocketAddr {
+        self.ip
+    }
+}
+
+#[derive(Default, Debug)]
+struct ServerState {
+    connected_clients: HashMap<String, Vec<ClientConnection>>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -21,15 +51,17 @@ async fn run_server() {
     println!(":: websocket server ::");
     let address = "127.0.0.1:9292";
 
+    let state = Arc::new(RwLock::new(ServerState::default()));
+
     let tcp_socket = TcpListener::bind(address).await.expect("Failed to bind");
     println!("listening on {}", address);
 
     while let Ok((stream, _)) = tcp_socket.accept().await {
-        tokio::spawn(accept_connection(stream));
+        tokio::spawn(accept_connection(stream, Arc::clone(&state)));
     }
 }
 
-async fn accept_connection(stream: TcpStream) {
+async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let pool = sqlx::SqlitePool::connect(&std::env::var("DATABASE_URL").unwrap())
         .await
         .unwrap();
@@ -47,7 +79,23 @@ async fn accept_connection(stream: TcpStream) {
 
     let (mut writer, mut reader) = ws_stream.split();
 
-    handshake(&mut reader, &mut writer, &pool).await.unwrap();
+    let jid = handshake(&mut reader, &mut writer, &pool).await.unwrap();
+
+    // Save client to the state
+    let mut state = state.write().await;
+
+    let conn_key = jid.address();
+    let conn_val = (*state).connected_clients.get(&conn_key);
+    if conn_val.is_none() {
+        (*state)
+            .connected_clients
+            .insert(conn_key.clone(), Vec::new());
+    }
+    if let Some(conns) = (*state).connected_clients.get_mut(&conn_key) {
+        conns.push(ClientConnection::new(jid.resource_part, addr));
+    }
+    println!("{:?}", &state);
+    drop(state);
 
     while let Some(raw_stanza) = reader.get_next_text().await {
         // Try to parse stanza
@@ -80,7 +128,7 @@ async fn handshake(
     reader: &mut Reader,
     writer: &mut Writer,
     pool: &sqlx::SqlitePool,
-) -> color_eyre::Result<()> {
+) -> eyre::Result<Jid> {
     let mut db_conn = pool.acquire().await?;
 
     reset_connection(reader, writer)
@@ -122,6 +170,7 @@ async fn handshake(
         eyre::bail!("failed authentication")
     }
     let jid = credentials.username;
+    let (local_part, domain_part) = jid.split_at(jid.find("@").expect("invalid jid"));
 
     let success =
         AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).into_string();
@@ -148,11 +197,16 @@ async fn handshake(
 
     // After sending features, client will ask for a resource and server has to
     // generate it
-    generate_resource(reader, writer, jid)
-        .await
-        .expect("failed to generate resource");
+    let jid = generate_jid(
+        reader,
+        writer,
+        local_part.to_string(),
+        domain_part[1..].to_string(),
+    )
+    .await
+    .expect("failed to generate resource");
 
-    Ok(())
+    Ok(jid)
 }
 
 async fn check_credentials(
@@ -206,11 +260,12 @@ async fn negotiate_features(
     Ok(())
 }
 
-async fn generate_resource(
+async fn generate_jid(
     reader: &mut Reader,
     writer: &mut Writer,
-    jid: String,
-) -> eyre::Result<()> {
+    local_part: String,
+    domain_part: String,
+) -> eyre::Result<Jid> {
     let next = reader
         .get_next_text()
         .await
@@ -221,13 +276,14 @@ async fn generate_resource(
         _ => eyre::bail!("invalid bind request"),
     };
 
-    let resource = Uuid::new_v4().to_string();
+    let resource_part = Uuid::new_v4().to_string();
+    let jid = Jid::new(local_part, domain_part, resource_part);
     let bind_response = Stanza::Iq(StanzaIq {
         iq_id: bind_request.iq_id,
         iq_type: "result".to_string(),
         iq_payload: StanzaIqPayload::Bind(IqBindPayload {
             xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
-            jid: Some(format!("{jid}/{resource}")),
+            jid: Some(jid.to_string()),
             resource: None,
         }),
     });
@@ -236,7 +292,7 @@ async fn generate_resource(
         .send(Message::Text(bind_response.into_string()))
         .await?;
 
-    Ok(())
+    Ok(jid)
 }
 
 async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
