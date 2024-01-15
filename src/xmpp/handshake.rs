@@ -199,6 +199,7 @@ impl XmlCustomDeserialize for StreamHeaderResponse {
 pub struct StreamFeatures {
     pub start_tls: Option<StartTls>,
     pub mechanisms: Option<Mechanisms>,
+    pub bind: Option<Bind>,
 }
 
 impl StreamFeatures {
@@ -264,10 +265,18 @@ impl XmlCustomSerialize for StreamFeatures {
                     .write_event(Event::End(BytesEnd::new("mechanism")))
                     .unwrap();
             }
+
             // </mechanisms>
             writer
                 .write_event(Event::End(BytesEnd::new("mechanisms")))
                 .unwrap();
+        }
+
+        if let Some(bind) = &self.bind {
+            // <bind xmlns={...} />
+            let mut bind_start = BytesStart::new("bind");
+            bind_start.push_attribute(("xmlns", bind.xmlns.as_ref()));
+            writer.write_event(Event::Empty(bind_start)).unwrap();
         }
 
         // </stream:features>
@@ -285,6 +294,7 @@ impl XmlCustomDeserialize for StreamFeatures {
         let mut header_found = false;
         let mut start_tls: Option<StartTls> = None;
         let mut mechanisms: Option<Mechanisms> = None;
+        let mut bind: Option<Bind> = None;
 
         loop {
             if let Ok(event) = reader.read_event() {
@@ -310,6 +320,19 @@ impl XmlCustomDeserialize for StreamFeatures {
                                     xmlns,
                                     required: false,
                                 });
+                            }
+                            b"bind" => {
+                                if !header_found {
+                                    eyre::bail!("header not found");
+                                }
+
+                                let xmlns = std::str::from_utf8(
+                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
+                                )
+                                .unwrap()
+                                .to_string();
+
+                                bind = Some(Bind { xmlns });
                             }
                             _ => {}
                         }
@@ -390,6 +413,7 @@ impl XmlCustomDeserialize for StreamFeatures {
         Ok(StreamFeatures {
             start_tls,
             mechanisms,
+            bind,
         })
     }
 }
@@ -528,6 +552,10 @@ pub struct Mechanisms {
 
 pub struct Mechanism(pub String);
 
+pub struct Bind {
+    pub xmlns: String,
+}
+
 pub struct Authentication {
     pub xmlns: String,
     pub mechanism: Mechanism,
@@ -653,7 +681,9 @@ pub struct AuthenticationSuccess {
 }
 
 impl AuthenticationSuccess {
-    pub fn new(xmlns: String) -> Self { Self { xmlns } }
+    pub fn new(xmlns: String) -> Self {
+        Self { xmlns }
+    }
 }
 
 impl XmlCustomDeserialize for AuthenticationSuccess {
@@ -676,7 +706,7 @@ impl XmlCustomDeserialize for AuthenticationSuccess {
         }
 
         Ok(AuthenticationSuccess {
-            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?
+            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?,
         })
     }
 }
@@ -688,6 +718,6 @@ impl XmlCustomSerialize for AuthenticationSuccess {
         let mut success_start = BytesStart::new("success");
         success_start.push_attribute(("xmlns", self.xmlns.as_ref()));
         writer.write_event(Event::Empty(success_start)).unwrap();
-        writer.collect() 
+        writer.collect()
     }
 }

@@ -96,6 +96,7 @@ async fn handshake(
             xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
             required: true,
         }),
+        bind: None,
     };
     negotiate_features(features, reader, writer)
         .await
@@ -133,6 +134,19 @@ async fn handshake(
     reset_connection(reader, writer)
         .await
         .expect("failed to reset connection");
+
+    // After authentication, server has to send bind feature
+    let stream_features = StreamFeatures {
+        bind: Some(Bind {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+        }),
+        mechanisms: None,
+        start_tls: None,
+    };
+    negotiate_features(stream_features, reader, writer)
+        .await
+        .expect("failed to negotiate");
+
     Ok(())
 }
 

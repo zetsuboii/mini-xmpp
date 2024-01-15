@@ -71,6 +71,7 @@ enum HandshakeState {
     Header,
     Features,
     Authentication,
+    ResourceBinding,
     Done,
 }
 
@@ -82,7 +83,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
     loop {
         match state {
             HandshakeState::Header => {
-                let conn_id = reset_connection(reader, writer).await.expect("failed to start connection");
+                let conn_id = reset_connection(reader, writer)
+                    .await
+                    .expect("failed to start connection");
                 println!("connection reset: {conn_id}");
                 state = HandshakeState::Features;
             }
@@ -143,7 +146,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                 state = HandshakeState::Authentication;
             }
             HandshakeState::Authentication => {
-                let conn_id = reset_connection(reader, writer).await.expect("failed to reset connection");
+                let conn_id = reset_connection(reader, writer)
+                    .await
+                    .expect("failed to reset connection");
                 println!("connection reset: {conn_id}");
 
                 // Get credentials from stdin
@@ -177,11 +182,18 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Resu
                     .expect("failed to get response");
 
                 AuthenticationSuccess::from_string(&auth_response).expect("failed to authenticate");
-                state = HandshakeState::Done
+                state = HandshakeState::ResourceBinding;
+            }
+            HandshakeState::ResourceBinding => {
+                let conn_id = reset_connection(reader, writer)
+                    .await
+                    .expect("failed to reset connection");
+                println!("connection reset: {conn_id}");
+
+                bind_resource(reader).await.expect("failed to bind resource");
+                state = HandshakeState::Done;
             }
             HandshakeState::Done => {
-                let conn_id = reset_connection(reader, writer).await.expect("failed to reset connection");
-                println!("connection reset: {conn_id}");
                 return Ok(());
             }
         }
@@ -215,7 +227,17 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
     Ok(response_head.id)
 }
 
-async fn bind_resource() -> eyre::Result<()> {
+async fn bind_resource(reader: &mut Reader) -> eyre::Result<()> {
+    // Check if bind is given inside
+    let features = reader
+        .get_next_text()
+        .await
+        .expect("failed to get features");
+    let features = StreamFeatures::from_string(&features).expect("failed to parse features");
+    features.bind.expect("bind options not found");
+    
+
+
     Ok(())
 }
 
