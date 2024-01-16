@@ -21,44 +21,53 @@ impl ToString for Stanza {
 
         match self {
             Self::Message(message) => {
-                // <message to={...}>
-                let mut message_header = BytesStart::new("message");
+                // <message from={...} to={...}>
+                let mut message_start = BytesStart::new("message");
+                if let Some(id) = &message.id {
+                    message_start.push_attribute(("id", id.as_ref()));
+                }
+                if let Some(from) = &message.from {
+                    message_start.push_attribute(("from", from.as_ref()));
+                }
                 if let Some(to) = &message.to {
-                    message_header.push_attribute(("to", to.as_ref()));
+                    message_start.push_attribute(("to", to.as_ref()));
+                }
+                if let Some(xml_lang) = &message.xml_lang {
+                    message_start.push_attribute(("xml:lang", xml_lang.as_ref()));
                 }
 
-                writer.write_event(Event::Start(message_header)).unwrap();
-                // <body>
-                writer
-                    .write_event(Event::Start(BytesStart::new("body")))
-                    .unwrap();
-                // {...}
-                writer
-                    .write_event(Event::Text(BytesText::new(&message.body.as_ref())))
-                    .unwrap();
-                // </body>
-                writer
-                    .write_event(Event::End(BytesEnd::new("body")))
-                    .unwrap();
+                writer.write_event(Event::Start(message_start)).unwrap();
+
+                if let Some(body) = &message.body {
+                    // <body>
+                    writer
+                        .write_event(Event::Start(BytesStart::new("body")))
+                        .unwrap();
+                    // {...}
+                    writer
+                        .write_event(Event::Text(BytesText::new(body.as_ref())))
+                        .unwrap();
+                    // </body>
+                    writer
+                        .write_event(Event::End(BytesEnd::new("body")))
+                        .unwrap();
+                }
+
                 // </message>
                 writer
                     .write_event(Event::End(BytesEnd::new("message")))
                     .unwrap();
             }
             Self::Iq(iq) => {
-                let StanzaIq {
-                    iq_id,
-                    iq_type,
-                    iq_payload: iq_inner,
-                } = iq;
+                let StanzaIq { id, type_, payload } = iq;
 
                 // <iq id={...} type={...}>
                 let mut iq_header = BytesStart::new("iq");
-                iq_header.push_attribute(("id", iq_id.as_ref()));
-                iq_header.push_attribute(("type", iq_type.as_ref()));
+                iq_header.push_attribute(("id", id.as_ref()));
+                iq_header.push_attribute(("type", type_.as_ref()));
                 writer.write_event(Event::Start(iq_header)).unwrap();
 
-                match iq_inner {
+                match payload {
                     StanzaIqPayload::Bind(payload) => {
                         // <bind xmlns={...} >
                         let mut bind_start = BytesStart::new("bind");
@@ -124,144 +133,144 @@ impl TryFrom<&str> for Stanza {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
+        let start_tag = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            _ => eyre::bail!("invalid xml"),
+        };
 
-        if let Ok(Event::Start(e)) = reader.read_event() {
-            match e.name().as_ref() {
-                b"message" => {
-                    // attribute `to`
-                    let to = try_get_attribute(&e, "to").ok();
+        match start_tag.name().as_ref() {
+            b"message" => {
+                let id = try_get_attribute(&start_tag, "id").ok();
+                let from = try_get_attribute(&start_tag, "from").ok();
+                let to = try_get_attribute(&start_tag, "to").ok();
+                let xml_lang = try_get_attribute(&start_tag, "xml:lang").ok();
 
-                    // <body>
-                    if let Ok(Event::Start(body_elem)) = reader.read_event() {
-                        if body_elem.name().as_ref() != b"body" {
-                            eyre::bail!("expected <body>");
-                        }
-                        // { text }
-                        if let Ok(Event::Text(text_elem)) = reader.read_event() {
-                            let body = String::from_utf8(text_elem.to_vec())
-                                .expect("invalid utf8 body text");
-                            // return parsed
-                            Ok(Stanza::Message(StanzaMessage {
-                                from: None,
-                                to,
-                                body,
-                            }))
-                        } else {
-                            eyre::bail!("failed to read body text")
-                        }
-                    } else {
-                        eyre::bail!("failed to read body")
+                // <body>
+                if let Ok(Event::Start(body_elem)) = reader.read_event() {
+                    if body_elem.name().as_ref() != b"body" {
+                        eyre::bail!("expected <body>");
                     }
+                    // { text }
+                    if let Ok(Event::Text(text_elem)) = reader.read_event() {
+                        let body = String::from_utf8(text_elem.to_vec()).ok();
+                        // return parsed
+                        Ok(Stanza::Message(StanzaMessage {
+                            id,
+                            from,
+                            to,
+                            body,
+                            xml_lang,
+                        }))
+                    } else {
+                        eyre::bail!("failed to read body text")
+                    }
+                } else {
+                    eyre::bail!("failed to read body")
                 }
-                b"iq" => {
-                    // attribute `id`
-                    let iq_id = try_get_attribute(&e, "id").expect("id");
-                    // attribute `type`
-                    let iq_type = try_get_attribute(&e, "type").expect("type");
+            }
+            b"iq" => {
+                // attribute `id`
+                let iq_id = try_get_attribute(&start_tag, "id").expect("id");
+                // attribute `type`
+                let iq_type = try_get_attribute(&start_tag, "type").expect("type");
 
-                    let mut iq_payload: Option<StanzaIqPayload> = None;
+                let mut iq_payload: Option<StanzaIqPayload> = None;
 
-                    while let Ok(payload_event) = reader.read_event() {
-                        match payload_event {
-                            Event::Empty(tag) => {
+                while let Ok(payload_event) = reader.read_event() {
+                    match payload_event {
+                        Event::Empty(tag) => {
+                            let xmlns = tag
+                                .try_get_attribute("xmlns")
+                                .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                .map(|attr| attr.value)
+                                .map(|value| String::from_utf8(value.into()))??;
+
+                            iq_payload = Some(StanzaIqPayload::Bind(IqBindPayload {
+                                xmlns,
+                                jid: None,
+                                resource: None,
+                            }));
+                        }
+                        Event::Start(tag) => match tag.name().as_ref() {
+                            b"bind" => {
                                 let xmlns = tag
-                                    .try_get_attribute("xmlns")
-                                    .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
                                     .map(|attr| attr.value)
                                     .map(|value| String::from_utf8(value.into()))??;
 
-                                iq_payload = Some(StanzaIqPayload::Bind(IqBindPayload {
+                                let mut bind_payload = IqBindPayload {
                                     xmlns,
                                     jid: None,
                                     resource: None,
-                                }));
-                            }
-                            Event::Start(tag) => match tag.name().as_ref() {
-                                b"bind" => {
-                                    let xmlns = tag
-                                        .try_get_attribute("xmlns")?
-                                        .ok_or(eyre::eyre!("xmlns not found"))
-                                        .map(|attr| attr.value)
-                                        .map(|value| String::from_utf8(value.into()))??;
+                                };
 
-                                    let mut bind_payload = IqBindPayload {
-                                        xmlns,
-                                        jid: None,
-                                        resource: None,
-                                    };
-
-                                    while let Ok(bind_event) = reader.read_event() {
-                                        match bind_event {
-                                            Event::Start(tag) => {
-                                                if tag.name().as_ref() == b"jid" {
-                                                    let text_event = reader.read_event();
-                                                    if let Ok(Event::Text(text)) = text_event {
-                                                        bind_payload.jid = Some(
-                                                            String::from_utf8(text.to_vec())
-                                                                .unwrap(),
-                                                        );
-                                                    }
-                                                } else if tag.name().as_ref() == b"resource" {
-                                                    let text_event = reader.read_event();
-                                                    if let Ok(Event::Text(text)) = text_event {
-                                                        bind_payload.resource = Some(
-                                                            String::from_utf8(text.to_vec())
-                                                                .unwrap(),
-                                                        );
-                                                    }
+                                while let Ok(bind_event) = reader.read_event() {
+                                    match bind_event {
+                                        Event::Start(tag) => {
+                                            if tag.name().as_ref() == b"jid" {
+                                                let text_event = reader.read_event();
+                                                if let Ok(Event::Text(text)) = text_event {
+                                                    bind_payload.jid = Some(
+                                                        String::from_utf8(text.to_vec()).unwrap(),
+                                                    );
+                                                }
+                                            } else if tag.name().as_ref() == b"resource" {
+                                                let text_event = reader.read_event();
+                                                if let Ok(Event::Text(text)) = text_event {
+                                                    bind_payload.resource = Some(
+                                                        String::from_utf8(text.to_vec()).unwrap(),
+                                                    );
                                                 }
                                             }
-                                            Event::End(tag) => {
-                                                if tag.name().as_ref() == b"bind" {
-                                                    break;
-                                                }
-                                            }
-                                            _ => {}
                                         }
+                                        Event::End(tag) => {
+                                            if tag.name().as_ref() == b"bind" {
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                    iq_payload = Some(StanzaIqPayload::Bind(bind_payload));
                                 }
-                                _ => {}
-                            },
-                            Event::End(tag) => {
-                                if tag.name().as_ref() == b"iq" {
-                                    break;
-                                }
+                                iq_payload = Some(StanzaIqPayload::Bind(bind_payload));
                             }
                             _ => {}
+                        },
+                        Event::End(tag) => {
+                            if tag.name().as_ref() == b"iq" {
+                                break;
+                            }
                         }
+                        _ => {}
                     }
-
-                    Ok(Stanza::Iq(StanzaIq {
-                        iq_type,
-                        iq_id,
-                        iq_payload: iq_payload.expect("found empty payload"),
-                    }))
                 }
-                b"presence" => todo!(),
-                _ => eyre::bail!(format!(
-                    "expected message/iq/presence got {:?}",
-                    std::str::from_utf8(e.name().as_ref())
-                )),
+
+                Ok(Stanza::Iq(StanzaIq {
+                    type_: iq_type,
+                    id: iq_id,
+                    payload: iq_payload.expect("found empty payload"),
+                }))
             }
-        } else {
-            eyre::bail!("failed to parse Stanza")
+            b"presence" => todo!(),
+            _ => eyre::bail!("invalid stanza"),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct StanzaMessage {
+    pub id: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    pub body: String,
+    pub body: Option<String>,
+    pub xml_lang: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct StanzaIq {
-    pub iq_type: String,
-    pub iq_id: String,
-    pub iq_payload: StanzaIqPayload,
+    pub id: String,
+    pub type_: String,
+    pub payload: StanzaIqPayload,
 }
 
 #[derive(Debug)]

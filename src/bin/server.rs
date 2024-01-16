@@ -103,10 +103,7 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
 
         match stanza {
             Stanza::Message(message) => {
-                println!(
-                    "< (Message) to={:?} body={} [{addr}]",
-                    message.to, message.body
-                )
+                println!("< {:?} [{addr}]", message)
             }
             Stanza::Iq(_) => println!("< (IQ) [{addr}]"),
             Stanza::Presence => println!("< (Presence) [{addr}]"),
@@ -172,8 +169,7 @@ async fn handshake(
     let jid = credentials.username;
     let (local_part, domain_part) = jid.split_at(jid.find("@").expect("invalid jid"));
 
-    let success =
-        AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).to_string();
+    let success = AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).to_string();
     writer
         .send(Message::Text(success))
         .await
@@ -279,9 +275,9 @@ async fn generate_jid(
     let resource_part = Uuid::new_v4().to_string();
     let jid = Jid::new(local_part, domain_part, resource_part);
     let bind_response = Stanza::Iq(StanzaIq {
-        iq_id: bind_request.iq_id,
-        iq_type: "result".to_string(),
-        iq_payload: StanzaIqPayload::Bind(IqBindPayload {
+        id: bind_request.id,
+        type_: "result".to_string(),
+        payload: StanzaIqPayload::Bind(IqBindPayload {
             xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
             jid: Some(jid.to_string()),
             resource: None,

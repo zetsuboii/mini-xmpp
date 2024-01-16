@@ -26,7 +26,7 @@ async fn run_client() {
     let (mut writer, mut reader) = ws_stream.split();
 
     // Do the handshake
-    handshake(&mut reader, &mut writer).await.unwrap();
+    let jid = handshake(&mut reader, &mut writer).await.unwrap();
 
     let sender = tokio::spawn(async move {
         loop {
@@ -48,9 +48,11 @@ async fn run_client() {
 
             // Send user input
             let message = Stanza::Message(StanzaMessage {
-                from: None,
+                id: None,
+                from: Some(jid.clone()),
                 to: Some("some@im.com".to_string()),
-                body: user_input,
+                body: Some(user_input),
+                xml_lang: Some("en".to_string())
             })
             .to_string();
 
@@ -79,8 +81,9 @@ enum HandshakeState {
 
 type Reader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 type Writer = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
-async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
+async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<String> {
     let mut state = HandshakeState::Header;
+    let mut jid: Option<String> = None;
 
     loop {
         match state {
@@ -192,13 +195,15 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                     .expect("failed to reset connection");
                 println!("connection reset: {conn_id}");
 
-                bind_resource(reader, writer)
+                let bind_response = bind_resource(reader, writer)
                     .await
                     .expect("failed to bind resource");
+                jid = Some(bind_response);
+
                 state = HandshakeState::Done;
             }
             HandshakeState::Done => {
-                return Ok(());
+                return Ok(jid.expect("jid not found"));
             }
         }
     }
@@ -231,7 +236,7 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
     Ok(response_head.id)
 }
 
-async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
+async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<String> {
     // Check if bind is given inside
     let features = reader
         .get_next_text()
@@ -242,9 +247,9 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
 
     // Send Iq that includes bind request, server will assign the resource
     let iq = StanzaIq {
-        iq_id: Uuid::new_v4().to_string(),
-        iq_type: "set".to_string(),
-        iq_payload: StanzaIqPayload::Bind(IqBindPayload {
+        id: Uuid::new_v4().to_string(),
+        type_: "set".to_string(),
+        payload: StanzaIqPayload::Bind(IqBindPayload {
             xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
             jid: None,
             resource: None,
@@ -264,9 +269,12 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
         Stanza::Iq(iq) => iq,
         _ => unreachable!("invalid iq"),
     };
-    println!("new resource: {:?}", iq_response.iq_payload);
 
-    Ok(())
+    let iq_payload = match iq_response.payload {
+        StanzaIqPayload::Bind(payload) => payload,
+    };
+
+    iq_payload.jid.ok_or(eyre::eyre!("jid not found"))
 }
 
 // Our helper method which will read data from stdin and send it along the
