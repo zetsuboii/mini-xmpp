@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use color_eyre::eyre;
 use dotenvy::dotenv;
@@ -10,28 +10,40 @@ use mini_jabber::*;
 use sqlx::pool::PoolConnection;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
+type Reader = SplitStream<WebSocketStream<TcpStream>>;
+type Writer = SplitSink<WebSocketStream<TcpStream>, Message>;
+
 #[derive(Debug)]
 struct ClientConnection {
     resource: String,
-    ip: SocketAddr,
+    reader: Arc<Mutex<Reader>>,
+    writer: Arc<Mutex<Writer>>,
 }
 
 impl ClientConnection {
-    fn new(resource: String, ip: SocketAddr) -> Self {
-        Self { resource, ip }
+    fn new(resource: String, reader: Arc<Mutex<Reader>>, writer: Arc<Mutex<Writer>>) -> Self {
+        Self {
+            resource,
+            reader,
+            writer,
+        }
     }
 
     fn resource(&self) -> &str {
         self.resource.as_ref()
     }
 
-    fn ip(&self) -> SocketAddr {
-        self.ip
+    fn reader(&self) -> &Mutex<Reader> {
+        &self.reader
+    }
+
+    fn writer(&self) -> &Mutex<Writer> {
+        &self.writer
     }
 }
 
@@ -77,9 +89,13 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
 
     println!("new websocket connection: {}", addr);
 
-    let (mut writer, mut reader) = ws_stream.split();
+    let (writer, reader) = ws_stream.split();
+    let writer = Arc::new(Mutex::new(writer));
+    let reader = Arc::new(Mutex::new(reader));
 
-    let jid = handshake(&mut reader, &mut writer, &pool).await.unwrap();
+    let jid = handshake(&Arc::clone(&reader), &Arc::clone(&writer), &pool)
+        .await
+        .unwrap();
 
     // Save client to the state
     let mut state = state.write().await;
@@ -92,12 +108,12 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
             .insert(conn_key.clone(), Vec::new());
     }
     if let Some(conns) = (*state).connected_clients.get_mut(&conn_key) {
-        conns.push(ClientConnection::new(jid.resource_part, addr));
+        conns.push(ClientConnection::new(jid.resource_part, Arc::clone(&reader), Arc::clone(&writer)));
     }
     println!("{:?}", &state);
     drop(state);
 
-    while let Some(raw_stanza) = reader.get_next_text().await {
+    while let Some(raw_stanza) = reader.lock().await.get_next_text().await {
         // Try to parse stanza
         let stanza = Stanza::try_from(raw_stanza.as_ref()).expect("failed to parse stanza");
 
@@ -110,6 +126,8 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
         }
 
         writer
+            .lock()
+            .await
             .send(Message::Text("ack".to_string()))
             .await
             .expect("failed to send ack");
@@ -118,12 +136,9 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     }
 }
 
-type Reader = SplitStream<WebSocketStream<TcpStream>>;
-type Writer = SplitSink<WebSocketStream<TcpStream>, Message>;
-
 async fn handshake(
-    reader: &mut Reader,
-    writer: &mut Writer,
+    reader: &Mutex<Reader>,
+    writer: &Mutex<Writer>,
     pool: &sqlx::SqlitePool,
 ) -> eyre::Result<Jid> {
     let mut db_conn = pool.acquire().await?;
@@ -153,6 +168,8 @@ async fn handshake(
 
     // Authenticate
     let authentication = reader
+        .lock()
+        .await
         .get_next_text()
         .await
         .expect("failed to get authentication");
@@ -171,6 +188,8 @@ async fn handshake(
 
     let success = AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).to_string();
     writer
+        .lock()
+        .await
         .send(Message::Text(success))
         .await
         .expect("failed to send success message");
@@ -234,9 +253,12 @@ async fn check_credentials(
 
 async fn negotiate_features(
     features: StreamFeatures,
-    reader: &mut Reader,
-    writer: &mut Writer,
+    reader: &Mutex<Reader>,
+    writer: &Mutex<Writer>,
 ) -> eyre::Result<()> {
+    let mut reader = reader.lock().await;
+    let mut writer = writer.lock().await;
+
     writer.send(Message::Text(features.to_string())).await?;
 
     // If TLS is required, negotiate TLS
@@ -257,11 +279,14 @@ async fn negotiate_features(
 }
 
 async fn generate_jid(
-    reader: &mut Reader,
-    writer: &mut Writer,
+    reader: &Mutex<Reader>,
+    writer: &Mutex<Writer>,
     local_part: String,
     domain_part: String,
 ) -> eyre::Result<Jid> {
+    let mut reader = reader.lock().await;
+    let mut writer = writer.lock().await;
+
     let next = reader
         .get_next_text()
         .await
@@ -291,7 +316,10 @@ async fn generate_jid(
     Ok(jid)
 }
 
-async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
+async fn reset_connection(reader: &Mutex<Reader>, writer: &Mutex<Writer>) -> eyre::Result<()> {
+    let mut reader = reader.lock().await;
+    let mut writer = writer.lock().await;
+
     let next = reader
         .get_next_text()
         .await
