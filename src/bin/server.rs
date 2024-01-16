@@ -99,12 +99,12 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
 
     while let Some(raw_stanza) = reader.get_next_text().await {
         // Try to parse stanza
-        let stanza = Stanza::from_string(raw_stanza.as_ref()).expect("failed to parse stanza");
+        let stanza = Stanza::try_from(raw_stanza.as_ref()).expect("failed to parse stanza");
 
         match stanza {
             Stanza::Message(message) => {
                 println!(
-                    "< (Message) to={} body={} [{addr}]",
+                    "< (Message) to={:?} body={} [{addr}]",
                     message.to, message.body
                 )
             }
@@ -161,7 +161,7 @@ async fn handshake(
         .expect("failed to get authentication");
 
     let authentication =
-        Authentication::from_string(&authentication).expect("failed to parse authentication");
+        Authentication::try_from(authentication.as_ref()).expect("failed to parse authentication");
     let credentials = Credentials::from_base64(authentication.value);
     let valid = check_credentials(&credentials, &mut db_conn)
         .await
@@ -173,7 +173,7 @@ async fn handshake(
     let (local_part, domain_part) = jid.split_at(jid.find("@").expect("invalid jid"));
 
     let success =
-        AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).into_string();
+        AuthenticationSuccess::new("urn:ietf:params:xml:ns:xmpp-sasl".into()).to_string();
     writer
         .send(Message::Text(success))
         .await
@@ -241,7 +241,7 @@ async fn negotiate_features(
     reader: &mut Reader,
     writer: &mut Writer,
 ) -> eyre::Result<()> {
-    writer.send(Message::Text(features.into_string())).await?;
+    writer.send(Message::Text(features.to_string())).await?;
 
     // If TLS is required, negotiate TLS
     if let Some(tls) = features.start_tls {
@@ -250,9 +250,9 @@ async fn negotiate_features(
                 .get_next_text()
                 .await
                 .ok_or(eyre::eyre!("failed to get response"))?;
-            StartTls::from_string(&next)?;
+            StartTls::try_from(next.as_ref())?;
 
-            let tls_proceed = StartTlsProceed().into_string();
+            let tls_proceed = StartTlsProceed().to_string();
             writer.send(Message::Text(tls_proceed)).await?;
         }
     }
@@ -271,7 +271,7 @@ async fn generate_jid(
         .await
         .ok_or(eyre::eyre!("failed to get bind request"))?;
 
-    let bind_request = match Stanza::from_string(next.as_ref())? {
+    let bind_request = match Stanza::try_from(next.as_ref())? {
         Stanza::Iq(iq) => iq,
         _ => eyre::bail!("invalid bind request"),
     };
@@ -289,7 +289,7 @@ async fn generate_jid(
     });
 
     writer
-        .send(Message::Text(bind_response.into_string()))
+        .send(Message::Text(bind_response.to_string()))
         .await?;
 
     Ok(jid)
@@ -300,12 +300,12 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
         .get_next_text()
         .await
         .ok_or(eyre::eyre!("failed to get header"))?;
-    let stream_head = StreamHeader::from_string(&next)?;
+    let stream_head = StreamHeader::try_from(next.as_ref())?;
     let stream_id = Uuid::new_v4().to_string();
     let response_head = stream_head.into_response(stream_id);
 
     writer
-        .send(Message::Text(response_head.into_string()))
+        .send(Message::Text(response_head.to_string()))
         .await?;
 
     Ok(())

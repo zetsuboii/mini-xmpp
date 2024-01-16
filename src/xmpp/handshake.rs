@@ -9,8 +9,6 @@ use quick_xml::{
 
 use crate::{try_get_attribute, Collect};
 
-use super::serialize::{XmlCustomDeserialize, XmlCustomSerialize};
-
 pub struct StreamHeader {
     pub from: String,
     pub to: String,
@@ -20,8 +18,8 @@ pub struct StreamHeader {
     pub xmlns_stream: String,
 }
 
-impl XmlCustomSerialize for StreamHeader {
-    fn into_string(&self) -> String {
+impl ToString for StreamHeader {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
 
         let mut stream_header = BytesStart::new("stream:stream");
@@ -37,8 +35,10 @@ impl XmlCustomSerialize for StreamHeader {
     }
 }
 
-impl XmlCustomDeserialize for StreamHeader {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for StreamHeader {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         let mut from: Option<String> = None;
@@ -118,8 +118,8 @@ pub struct StreamHeaderResponse {
     pub xmlns_stream: String,
 }
 
-impl XmlCustomSerialize for StreamHeaderResponse {
-    fn into_string(&self) -> String {
+impl ToString for StreamHeaderResponse {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
 
         let mut stream_header = BytesStart::new("stream:stream");
@@ -136,8 +136,10 @@ impl XmlCustomSerialize for StreamHeaderResponse {
     }
 }
 
-impl XmlCustomDeserialize for StreamHeaderResponse {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for StreamHeaderResponse {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         let mut id: Option<String> = None;
@@ -209,8 +211,8 @@ impl StreamFeatures {
     }
 }
 
-impl XmlCustomSerialize for StreamFeatures {
-    fn into_string(&self) -> String {
+impl ToString for StreamFeatures {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         let stream_features_start = BytesStart::new("stream:features");
 
@@ -288,8 +290,10 @@ impl XmlCustomSerialize for StreamFeatures {
     }
 }
 
-impl XmlCustomDeserialize for StreamFeatures {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for StreamFeatures {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         // <stream:features> or <stream:features/>
@@ -401,8 +405,8 @@ pub struct StartTls {
     pub required: bool,
 }
 
-impl XmlCustomSerialize for StartTls {
-    fn into_string(&self) -> String {
+impl ToString for StartTls {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         let mut start_tls_start = BytesStart::new("starttls");
         start_tls_start.push_attribute(("xmlns", self.xmlns.as_ref()));
@@ -425,8 +429,10 @@ impl XmlCustomSerialize for StartTls {
     }
 }
 
-impl XmlCustomDeserialize for StartTls {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for StartTls {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         let start_tls_start = reader.read_event()?;
@@ -463,8 +469,10 @@ pub enum StartTlsResponse {
     Failure(StartTlsFailure),
 }
 
-impl XmlCustomDeserialize for StartTlsResponse {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for StartTlsResponse {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         let tag = match reader.read_event()? {
@@ -484,8 +492,8 @@ impl XmlCustomDeserialize for StartTlsResponse {
 
 pub struct StartTlsProceed();
 
-impl XmlCustomSerialize for StartTlsProceed {
-    fn into_string(&self) -> String {
+impl ToString for StartTlsProceed {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         writer
             .write_event(Event::Empty(BytesStart::new("proceed")))
@@ -496,8 +504,8 @@ impl XmlCustomSerialize for StartTlsProceed {
 
 pub struct StartTlsFailure();
 
-impl XmlCustomSerialize for StartTlsFailure {
-    fn into_string(&self) -> String {
+impl ToString for StartTlsFailure {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         writer
             .write_event(Event::Empty(BytesStart::new("failure")))
@@ -543,8 +551,10 @@ impl Authentication {
     }
 }
 
-impl XmlCustomDeserialize for Authentication {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for Authentication {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         // <auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="PLAIN">
@@ -573,8 +583,8 @@ impl XmlCustomDeserialize for Authentication {
     }
 }
 
-impl XmlCustomSerialize for Authentication {
-    fn into_string(&self) -> String {
+impl ToString for Authentication {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         // <auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="PLAIN">
         let mut auth_start = BytesStart::new("auth");
@@ -632,8 +642,10 @@ impl AuthenticationSuccess {
     }
 }
 
-impl XmlCustomDeserialize for AuthenticationSuccess {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for AuthenticationSuccess {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         let tag = match reader.read_event()? {
@@ -651,8 +663,8 @@ impl XmlCustomDeserialize for AuthenticationSuccess {
     }
 }
 
-impl XmlCustomSerialize for AuthenticationSuccess {
-    fn into_string(&self) -> String {
+impl ToString for AuthenticationSuccess {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         // <success xmlns="urn:ietf:params:xml:ns:xmpp-sasl" />
         let mut success_start = BytesStart::new("success");

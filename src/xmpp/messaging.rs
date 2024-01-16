@@ -6,7 +6,7 @@ use quick_xml::{
     Reader, Writer,
 };
 
-use crate::{try_get_attribute, Collect, XmlCustomDeserialize, XmlCustomSerialize};
+use crate::{try_get_attribute, Collect};
 
 #[derive(Debug)]
 pub enum Stanza {
@@ -15,8 +15,8 @@ pub enum Stanza {
     Iq(StanzaIq),
 }
 
-impl XmlCustomSerialize for Stanza {
-    fn into_string(&self) -> String {
+impl ToString for Stanza {
+    fn to_string(&self) -> String {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
 
         match self {
@@ -119,8 +119,10 @@ impl XmlCustomSerialize for Stanza {
     }
 }
 
-impl XmlCustomDeserialize for Stanza {
-    fn from_string(value: &str) -> eyre::Result<Self> {
+impl TryFrom<&str> for Stanza {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut reader = Reader::from_str(value);
 
         if let Ok(Event::Start(e)) = reader.read_event() {

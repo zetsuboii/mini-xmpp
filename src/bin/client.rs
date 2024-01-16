@@ -48,10 +48,11 @@ async fn run_client() {
 
             // Send user input
             let message = Stanza::Message(StanzaMessage {
-                to: "some@im.com".to_string(),
+                from: None,
+                to: Some("some@im.com".to_string()),
                 body: user_input,
             })
-            .into_string();
+            .to_string();
 
             writer
                 .send(Message::Text(message))
@@ -96,7 +97,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                     .await
                     .expect("failed to get features");
                 let features =
-                    StreamFeatures::from_string(&features).expect("failed to parse features");
+                    StreamFeatures::try_from(features.as_ref()).expect("failed to parse features");
 
                 // If features are empty, negotiation is over
                 if features.mechanisms.is_none() && features.start_tls.is_none() {
@@ -121,7 +122,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                             xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
                             required: false,
                         }
-                        .into_string();
+                        .to_string();
                         writer
                             .send(Message::Text(tls_feature))
                             .await
@@ -132,7 +133,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                             .await
                             .expect("failed to get response");
 
-                        match StartTlsResponse::from_string(&tls_response) {
+                        match StartTlsResponse::try_from(tls_response.as_ref()) {
                             Ok(StartTlsResponse::Proceed(_)) => {}
                             Ok(StartTlsResponse::Failure(_)) => {
                                 eyre::bail!("tls response failed")
@@ -170,7 +171,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                     Mechanism("PLAIN".into()),
                     credentials.to_base64(),
                 )
-                .into_string();
+                .to_string();
 
                 writer
                     .send(Message::Text(authentication))
@@ -182,7 +183,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                     .await
                     .expect("failed to get response");
 
-                AuthenticationSuccess::from_string(&auth_response).expect("failed to authenticate");
+                AuthenticationSuccess::try_from(auth_response.as_ref()).expect("failed to authenticate");
                 state = HandshakeState::ResourceBinding;
             }
             HandshakeState::ResourceBinding => {
@@ -215,7 +216,7 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
 
     // Send StreamHeader to server
     writer
-        .send(Message::Text(stream_head.into_string()))
+        .send(Message::Text(stream_head.to_string()))
         .await?;
 
     // Get response from the server
@@ -224,7 +225,7 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
         .await
         .ok_or(eyre::eyre!("failed to get response"))?;
 
-    let response_head = StreamHeaderResponse::from_string(&next)
+    let response_head = StreamHeaderResponse::try_from(next.as_ref())
         .map_err(|_| eyre::eyre!("failed to parse header"))?;
 
     Ok(response_head.id)
@@ -236,7 +237,7 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
         .get_next_text()
         .await
         .ok_or(eyre::eyre!("failed to get features"))?;
-    let features = StreamFeatures::from_string(&features)?;
+    let features = StreamFeatures::try_from(features.as_ref())?;
     features.bind.expect("bind options not found");
 
     // Send Iq that includes bind request, server will assign the resource
@@ -250,7 +251,7 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
         }),
     };
     writer
-        .send(Message::Text(Stanza::Iq(iq).into_string()))
+        .send(Message::Text(Stanza::Iq(iq).to_string()))
         .await?;
 
     // Get the Iq that has resource assigned
@@ -259,7 +260,7 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
         .await
         .ok_or(eyre::eyre!("failed to get iq response"))?;
 
-    let iq_response = match Stanza::from_string(&iq_response)? {
+    let iq_response = match Stanza::try_from(iq_response.as_ref())? {
         Stanza::Iq(iq) => iq,
         _ => unreachable!("invalid iq"),
     };

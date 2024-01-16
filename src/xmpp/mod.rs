@@ -1,11 +1,11 @@
-mod handshake;
 mod collect;
-mod serialize;
-mod messaging;
+mod handshake;
 mod jid;
+mod messaging;
+mod helpers;
 
-pub use handshake::*;
 pub use collect::*;
-pub use serialize::*;
-pub use messaging::*;
+pub use handshake::*;
 pub use jid::*;
+pub use messaging::*;
+pub use helpers::*;

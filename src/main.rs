@@ -16,6 +16,6 @@ fn main() {
         bind: None
     };
 
-    let result = features.into_string();
+    let result = features.to_string();
     println!("result: {result}");
 }
