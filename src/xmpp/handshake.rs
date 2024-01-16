@@ -7,7 +7,7 @@ use quick_xml::{
     Reader, Writer,
 };
 
-use crate::Collect;
+use crate::{try_get_attribute, Collect};
 
 use super::serialize::{XmlCustomDeserialize, XmlCustomSerialize};
 
@@ -318,25 +318,14 @@ impl XmlCustomDeserialize for StreamFeatures {
                         if start_tls.is_some() {
                             eyre::bail!("starttls exists");
                         }
-
-                        let xmlns = tag
-                            .try_get_attribute("xmlns")?
-                            .ok_or(eyre::eyre!("xmlns not found"))
-                            .map(|attr| attr.value)
-                            .map(|value| String::from_utf8(value.into()))??;
-
+                        let xmlns = try_get_attribute(&tag, "xmlns")?;
                         start_tls = Some(StartTls {
                             xmlns,
                             required: false,
                         });
                     }
                     b"bind" => {
-                        let xmlns = tag
-                            .try_get_attribute("xmlns")?
-                            .ok_or(eyre::eyre!("xmlns not found"))
-                            .map(|attr| attr.value)
-                            .map(|value| String::from_utf8(value.into()))??;
-
+                        let xmlns = try_get_attribute(&tag, "xmlns")?;
                         bind = Some(Bind { xmlns });
                     }
                     _ => {}
@@ -349,12 +338,7 @@ impl XmlCustomDeserialize for StreamFeatures {
                             eyre::bail!("starttls exists");
                         }
 
-                        let xmlns = tag
-                            .try_get_attribute("xmlns")?
-                            .ok_or(eyre::eyre!("xmlns not found"))
-                            .map(|attr| attr.value)
-                            .map(|value| String::from_utf8(value.into()))??;
-
+                        let xmlns = try_get_attribute(&tag, "xmlns")?;
                         let mut required = false;
 
                         // <required />
@@ -373,12 +357,7 @@ impl XmlCustomDeserialize for StreamFeatures {
                         start_tls = Some(StartTls { xmlns, required });
                     }
                     b"mechanisms" => {
-                        let xmlns = tag
-                            .try_get_attribute("xmlns")?
-                            .ok_or(eyre::eyre!("xmlns not found"))
-                            .map(|attr| attr.value)
-                            .map(|value| String::from_utf8(value.into()))??;
-
+                        let xmlns = try_get_attribute(&tag, "xmlns")?;
                         let mut values = Vec::new();
 
                         while let Ok(event) = reader.read_event() {
@@ -457,11 +436,7 @@ impl XmlCustomDeserialize for StartTls {
             _ => eyre::bail!("invalid xml"),
         };
 
-        let xmlns = start_tls_start
-            .try_get_attribute("xmlns")?
-            .ok_or(eyre::eyre!("xmlns not found"))
-            .map(|attr| attr.value)
-            .map(|value| String::from_utf8(value.into()))??;
+        let xmlns = try_get_attribute(&start_tls_start, "xmlns")?;
 
         if start_tls_start.name().as_ref() != b"starttls" {
             eyre::bail!("invalid tag name")
@@ -580,16 +555,8 @@ impl XmlCustomDeserialize for Authentication {
         if auth_start.name().as_ref() != b"auth" {
             eyre::bail!("invalid tag name")
         }
-        let xmlns = auth_start
-            .try_get_attribute("xmlns")?
-            .ok_or(eyre::eyre!("xmlns not found"))
-            .map(|attr| attr.value)
-            .map(|value| String::from_utf8(value.into()))??;
-        let mechanism = auth_start
-            .try_get_attribute("xmlns")?
-            .ok_or(eyre::eyre!("xmlns not found"))
-            .map(|attr| attr.value)
-            .map(|value| String::from_utf8(value.into()).map(|name| Mechanism(name)))??;
+        let xmlns = try_get_attribute(&auth_start, "xmlns")?;
+        let mechanism = try_get_attribute(&auth_start, "mechanism").map(|name| Mechanism(name))?;
 
         // {...}
         let text_tag = match reader.read_event()? {
@@ -678,11 +645,7 @@ impl XmlCustomDeserialize for AuthenticationSuccess {
             eyre::bail!("invalid tag name");
         }
 
-        let xmlns = tag
-            .try_get_attribute("xmlns")?
-            .ok_or(eyre::eyre!("xmlns not found"))
-            .map(|attr| attr.value)
-            .map(|value| String::from_utf8(value.into()))??;
+        let xmlns = try_get_attribute(&tag, "xmlns")?;
 
         Ok(AuthenticationSuccess { xmlns })
     }

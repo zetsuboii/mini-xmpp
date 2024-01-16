@@ -6,18 +6,7 @@ use quick_xml::{
     Reader, Writer,
 };
 
-use crate::{Collect, XmlCustomDeserialize, XmlCustomSerialize};
-
-fn get_attr_or_panic(tag: &BytesStart, attribute: &'static str) -> String {
-    String::from_utf8(
-        tag.try_get_attribute(attribute)
-            .unwrap()
-            .unwrap()
-            .value
-            .to_vec(),
-    )
-    .expect(&format!("attribute {attribute} not found"))
-}
+use crate::{try_get_attribute, Collect, XmlCustomDeserialize, XmlCustomSerialize};
 
 #[derive(Debug)]
 pub enum Stanza {
@@ -34,7 +23,10 @@ impl XmlCustomSerialize for Stanza {
             Self::Message(message) => {
                 // <message to={...}>
                 let mut message_header = BytesStart::new("message");
-                message_header.push_attribute(("to", message.to.as_ref()));
+                if let Some(to) = &message.to {
+                    message_header.push_attribute(("to", to.as_ref()));
+                }
+
                 writer.write_event(Event::Start(message_header)).unwrap();
                 // <body>
                 writer
@@ -135,7 +127,7 @@ impl XmlCustomDeserialize for Stanza {
             match e.name().as_ref() {
                 b"message" => {
                     // attribute `to`
-                    let to = get_attr_or_panic(&e, "to");
+                    let to = try_get_attribute(&e, "to").ok();
 
                     // <body>
                     if let Ok(Event::Start(body_elem)) = reader.read_event() {
@@ -147,7 +139,11 @@ impl XmlCustomDeserialize for Stanza {
                             let body = String::from_utf8(text_elem.to_vec())
                                 .expect("invalid utf8 body text");
                             // return parsed
-                            Ok(Stanza::Message(StanzaMessage { to, body }))
+                            Ok(Stanza::Message(StanzaMessage {
+                                from: None,
+                                to,
+                                body,
+                            }))
                         } else {
                             eyre::bail!("failed to read body text")
                         }
@@ -157,9 +153,9 @@ impl XmlCustomDeserialize for Stanza {
                 }
                 b"iq" => {
                     // attribute `id`
-                    let iq_id = get_attr_or_panic(&e, "id");
+                    let iq_id = try_get_attribute(&e, "id").expect("id");
                     // attribute `type`
-                    let iq_type = get_attr_or_panic(&e, "type");
+                    let iq_type = try_get_attribute(&e, "type").expect("type");
 
                     let mut iq_payload: Option<StanzaIqPayload> = None;
 
@@ -254,7 +250,8 @@ impl XmlCustomDeserialize for Stanza {
 
 #[derive(Debug)]
 pub struct StanzaMessage {
-    pub to: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
     pub body: String,
 }
 
