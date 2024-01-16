@@ -28,22 +28,34 @@ async fn run_client() {
     // Do the handshake
     let jid = handshake(&mut reader, &mut writer).await.unwrap();
 
+    let receiver = tokio::spawn(async move {
+        loop {
+            let response = reader
+                .get_next_text()
+                .await
+                .expect("failed to get response");
+            println!("\r< {}", response);
+            print!("{}\n> ", "=".repeat(32));
+            std::io::stdout().lock().flush().expect("failed to flush");
+        }
+    });
+
     let sender = tokio::spawn(async move {
         loop {
-            let mut user_input = String::new();
+            let mut input = String::new();
 
             // Make a new line
-            print!("{}\n> ", ">".repeat(32));
+            print!("{}\n> ", "=".repeat(32));
             std::io::stdout().lock().flush().expect("failed to flush");
 
             // Read user input
             std::io::stdin()
                 .lock()
-                .read_line(&mut user_input)
+                .read_line(&mut input)
                 .expect("failed to read to string");
 
-            while user_input.ends_with("\n") {
-                user_input.truncate(user_input.len() - 1);
+            while input.ends_with("\n") {
+                input.truncate(input.len() - 1);
             }
 
             // Send user input
@@ -51,7 +63,7 @@ async fn run_client() {
                 id: None,
                 from: Some(jid.clone()),
                 to: Some("some@im.com".to_string()),
-                body: Some(user_input),
+                body: Some(input),
                 xml_lang: Some("en".to_string())
             })
             .to_string();
@@ -60,14 +72,10 @@ async fn run_client() {
                 .send(Message::Text(message))
                 .await
                 .expect("failed to send message");
-
-            let response = reader
-                .get_next_text()
-                .await
-                .expect("failed to get response");
-            println!("< {}", response);
         }
     });
+    
+    receiver.await.unwrap();
     sender.await.unwrap();
 }
 
