@@ -78,7 +78,7 @@ enum HandshakeState {
 
 type Reader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 type Writer = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
-async fn handshake(reader: &mut Reader, writer: &mut Writer) -> color_eyre::Result<()> {
+async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()> {
     let mut state = HandshakeState::Header;
 
     loop {

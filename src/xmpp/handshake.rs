@@ -311,11 +311,11 @@ impl XmlCustomDeserialize for StreamFeatures {
                                     eyre::bail!("starttls exists");
                                 }
 
-                                let xmlns = std::str::from_utf8(
-                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string();
+                                let xmlns = e
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
 
                                 start_tls = Some(StartTls {
                                     xmlns,
@@ -327,11 +327,11 @@ impl XmlCustomDeserialize for StreamFeatures {
                                     eyre::bail!("header not found");
                                 }
 
-                                let xmlns = std::str::from_utf8(
-                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string();
+                                let xmlns = e
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
 
                                 bind = Some(Bind { xmlns });
                             }
@@ -349,11 +349,11 @@ impl XmlCustomDeserialize for StreamFeatures {
                                     eyre::bail!("starttls exists");
                                 }
 
-                                let xmlns = std::str::from_utf8(
-                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string();
+                                let xmlns = e
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
 
                                 let mut required = false;
 
@@ -378,11 +378,11 @@ impl XmlCustomDeserialize for StreamFeatures {
                                     eyre::bail!("header not found")
                                 }
 
-                                let xmlns = std::str::from_utf8(
-                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string();
+                                let xmlns = e
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
 
                                 let mut values = Vec::new();
 
@@ -456,10 +456,11 @@ impl XmlCustomDeserialize for StartTls {
         while let Ok(event) = reader.read_event() {
             match event {
                 Event::Empty(e) => {
-                    let xmlns =
-                        std::str::from_utf8(&e.try_get_attribute("xmlns").unwrap().unwrap().value)
-                            .unwrap()
-                            .to_string();
+                    let xmlns = e
+                        .try_get_attribute("xmlns")?
+                        .ok_or(eyre::eyre!("xmlns not found"))
+                        .map(|attr| attr.value)
+                        .map(|value| String::from_utf8(value.into()))??;
 
                     if e.name().as_ref() == b"starttls" {
                         return Ok(StartTls {
@@ -469,10 +470,11 @@ impl XmlCustomDeserialize for StartTls {
                     }
                 }
                 Event::Start(e) => {
-                    let xmlns =
-                        std::str::from_utf8(&e.try_get_attribute("xmlns").unwrap().unwrap().value)
-                            .unwrap()
-                            .to_string();
+                    let xmlns = e
+                        .try_get_attribute("xmlns")?
+                        .ok_or(eyre::eyre!("xmlns not found"))
+                        .map(|attr| attr.value)
+                        .map(|value| String::from_utf8(value.into()))??;
 
                     let mut required = false;
 
@@ -598,13 +600,11 @@ impl XmlCustomDeserialize for Authentication {
                     let name = e.name();
                     match name.as_ref() {
                         b"auth" => {
-                            xmlns = Some(
-                                std::str::from_utf8(
-                                    &e.try_get_attribute("xmlns").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string(),
-                            );
+                            xmlns = e
+                                .try_get_attribute("xmlns")?
+                                .map(|attr| attr.value)
+                                .map(|value| String::from_utf8(value.into()).ok())
+                                .flatten();
                             mechanism = Some(Mechanism(
                                 std::str::from_utf8(
                                     &e.try_get_attribute("mechanism").unwrap().unwrap().value,
@@ -699,11 +699,11 @@ impl XmlCustomDeserialize for AuthenticationSuccess {
         while let Ok(event) = reader.read_event() {
             match event {
                 Event::Empty(e) => {
-                    xmlns = Some(
-                        std::str::from_utf8(&e.try_get_attribute("xmlns").unwrap().unwrap().value)
-                            .unwrap()
-                            .to_string(),
-                    );
+                    xmlns = e
+                        .try_get_attribute("xmlns")?
+                        .map(|attr| attr.value)
+                        .map(|value| String::from_utf8(value.into()).ok())
+                        .flatten();
                     break;
                 }
                 _ => {}

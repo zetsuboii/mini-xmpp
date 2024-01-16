@@ -128,7 +128,7 @@ impl XmlCustomSerialize for Stanza {
 }
 
 impl XmlCustomDeserialize for Stanza {
-    fn from_string(value: &str) -> color_eyre::eyre::Result<Self> {
+    fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
 
         if let Ok(Event::Start(e)) = reader.read_event() {
@@ -181,8 +181,8 @@ impl XmlCustomDeserialize for Stanza {
                             Event::Start(tag) => match tag.name().as_ref() {
                                 b"bind" => {
                                     let xmlns = tag
-                                        .try_get_attribute("xmlns")
-                                        .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                        .try_get_attribute("xmlns")?
+                                        .ok_or(eyre::eyre!("xmlns not found"))
                                         .map(|attr| attr.value)
                                         .map(|value| String::from_utf8(value.into()))??;
 
