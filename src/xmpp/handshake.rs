@@ -292,122 +292,119 @@ impl XmlCustomDeserialize for StreamFeatures {
     fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
 
-        let mut header_found = false;
+        // <stream:features> or <stream:features/>
+        match reader.read_event()? {
+            Event::Start(_) => {}
+            Event::Empty(_) => {
+                return Ok(StreamFeatures {
+                    bind: None,
+                    start_tls: None,
+                    mechanisms: None,
+                })
+            }
+            _ => eyre::bail!("invalid xml"),
+        }
+
         let mut start_tls: Option<StartTls> = None;
         let mut mechanisms: Option<Mechanisms> = None;
         let mut bind: Option<Bind> = None;
 
-        loop {
-            if let Ok(event) = reader.read_event() {
-                match event {
-                    Event::Eof => break,
-                    Event::Empty(e) => {
-                        let name = e.name();
-                        match name.as_ref() {
-                            b"starttls" => {
-                                if !header_found {
-                                    eyre::bail!("header not found")
-                                } else if start_tls.is_some() {
-                                    eyre::bail!("starttls exists");
-                                }
-
-                                let xmlns = e
-                                    .try_get_attribute("xmlns")?
-                                    .ok_or(eyre::eyre!("xmlns not found"))
-                                    .map(|attr| attr.value)
-                                    .map(|value| String::from_utf8(value.into()))??;
-
-                                start_tls = Some(StartTls {
-                                    xmlns,
-                                    required: false,
-                                });
-                            }
-                            b"bind" => {
-                                if !header_found {
-                                    eyre::bail!("header not found");
-                                }
-
-                                let xmlns = e
-                                    .try_get_attribute("xmlns")?
-                                    .ok_or(eyre::eyre!("xmlns not found"))
-                                    .map(|attr| attr.value)
-                                    .map(|value| String::from_utf8(value.into()))??;
-
-                                bind = Some(Bind { xmlns });
-                            }
-                            _ => {}
+        while let Ok(event) = reader.read_event() {
+            match event {
+                // <starttls />
+                // <bind />
+                Event::Empty(tag) => match tag.name().as_ref() {
+                    b"starttls" => {
+                        if start_tls.is_some() {
+                            eyre::bail!("starttls exists");
                         }
+
+                        let xmlns = tag
+                            .try_get_attribute("xmlns")?
+                            .ok_or(eyre::eyre!("xmlns not found"))
+                            .map(|attr| attr.value)
+                            .map(|value| String::from_utf8(value.into()))??;
+
+                        start_tls = Some(StartTls {
+                            xmlns,
+                            required: false,
+                        });
                     }
-                    Event::Start(e) => {
-                        let name = e.name();
-                        match name.as_ref() {
-                            b"stream:features" => header_found = true,
-                            b"starttls" => {
-                                if !header_found {
-                                    eyre::bail!("header not found")
-                                } else if start_tls.is_some() {
-                                    eyre::bail!("starttls exists");
-                                }
+                    b"bind" => {
+                        let xmlns = tag
+                            .try_get_attribute("xmlns")?
+                            .ok_or(eyre::eyre!("xmlns not found"))
+                            .map(|attr| attr.value)
+                            .map(|value| String::from_utf8(value.into()))??;
 
-                                let xmlns = e
-                                    .try_get_attribute("xmlns")?
-                                    .ok_or(eyre::eyre!("xmlns not found"))
-                                    .map(|attr| attr.value)
-                                    .map(|value| String::from_utf8(value.into()))??;
-
-                                let mut required = false;
-
-                                while let Ok(event) = reader.read_event() {
-                                    match event {
-                                        Event::Empty(e) => {
-                                            if e.name().as_ref() == b"required" {
-                                                required = true;
-                                            }
-                                        }
-                                        Event::End(_) => {
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-
-                                start_tls = Some(StartTls { xmlns, required });
-                            }
-                            b"mechanisms" => {
-                                if !header_found {
-                                    eyre::bail!("header not found")
-                                }
-
-                                let xmlns = e
-                                    .try_get_attribute("xmlns")?
-                                    .ok_or(eyre::eyre!("xmlns not found"))
-                                    .map(|attr| attr.value)
-                                    .map(|value| String::from_utf8(value.into()))??;
-
-                                let mut values = Vec::new();
-
-                                while let Ok(event) = reader.read_event() {
-                                    match event {
-                                        Event::Text(text) => {
-                                            let text =
-                                                std::str::from_utf8(&text).unwrap().to_string();
-                                            values.push(Mechanism(text));
-                                        }
-                                        Event::End(_) => break,
-                                        _ => {}
-                                    }
-                                }
-
-                                mechanisms = Some(Mechanisms {
-                                    xmlns,
-                                    mechanisms: values,
-                                })
-                            }
-                            _ => {}
-                        }
+                        bind = Some(Bind { xmlns });
                     }
                     _ => {}
+                },
+                // <starttls>
+                // <mechanisms>
+                Event::Start(tag) => match tag.name().as_ref() {
+                    b"starttls" => {
+                        if start_tls.is_some() {
+                            eyre::bail!("starttls exists");
+                        }
+
+                        let xmlns = tag
+                            .try_get_attribute("xmlns")?
+                            .ok_or(eyre::eyre!("xmlns not found"))
+                            .map(|attr| attr.value)
+                            .map(|value| String::from_utf8(value.into()))??;
+
+                        let mut required = false;
+
+                        // <required />
+                        while let Ok(event) = reader.read_event() {
+                            match event {
+                                Event::Empty(e) => {
+                                    if e.name().as_ref() == b"required" {
+                                        required = true;
+                                    }
+                                }
+                                Event::End(_) => break,
+                                _ => {}
+                            }
+                        }
+
+                        start_tls = Some(StartTls { xmlns, required });
+                    }
+                    b"mechanisms" => {
+                        let xmlns = tag
+                            .try_get_attribute("xmlns")?
+                            .ok_or(eyre::eyre!("xmlns not found"))
+                            .map(|attr| attr.value)
+                            .map(|value| String::from_utf8(value.into()))??;
+
+                        let mut values = Vec::new();
+
+                        while let Ok(event) = reader.read_event() {
+                            match event {
+                                Event::Text(text) => {
+                                    let text = std::str::from_utf8(&text).unwrap().to_string();
+                                    values.push(Mechanism(text));
+                                }
+                                Event::End(_) => break,
+                                _ => {}
+                            }
+                        }
+
+                        mechanisms = Some(Mechanisms {
+                            xmlns,
+                            mechanisms: values,
+                        })
+                    }
+                    _ => {}
+                },
+                Event::End(tag) => {
+                    if tag.name().as_ref() == b"stream:features" {
+                        break;
+                    }
                 }
+                _ => {}
             }
         }
 
@@ -453,52 +450,36 @@ impl XmlCustomDeserialize for StartTls {
     fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
 
-        while let Ok(event) = reader.read_event() {
-            match event {
-                Event::Empty(e) => {
-                    let xmlns = e
-                        .try_get_attribute("xmlns")?
-                        .ok_or(eyre::eyre!("xmlns not found"))
-                        .map(|attr| attr.value)
-                        .map(|value| String::from_utf8(value.into()))??;
+        let start_tls_start = reader.read_event()?;
+        let (start_tls_start, empty) = match start_tls_start {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
+            _ => eyre::bail!("invalid xml"),
+        };
 
-                    if e.name().as_ref() == b"starttls" {
-                        return Ok(StartTls {
-                            xmlns,
-                            required: false,
-                        });
-                    }
-                }
-                Event::Start(e) => {
-                    let xmlns = e
-                        .try_get_attribute("xmlns")?
-                        .ok_or(eyre::eyre!("xmlns not found"))
-                        .map(|attr| attr.value)
-                        .map(|value| String::from_utf8(value.into()))??;
+        let xmlns = start_tls_start
+            .try_get_attribute("xmlns")?
+            .ok_or(eyre::eyre!("xmlns not found"))
+            .map(|attr| attr.value)
+            .map(|value| String::from_utf8(value.into()))??;
 
-                    let mut required = false;
-
-                    while let Ok(event) = reader.read_event() {
-                        match event {
-                            Event::Empty(e) => {
-                                if e.name().as_ref() == b"required" {
-                                    required = true;
-                                }
-                            }
-                            Event::End(_) => {
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    return Ok(StartTls { xmlns, required });
-                }
-                _ => {}
-            }
+        if start_tls_start.name().as_ref() != b"starttls" {
+            eyre::bail!("invalid tag name")
         }
 
-        eyre::bail!("failed to parse")
+        if empty {
+            return Ok(StartTls {
+                xmlns,
+                required: false,
+            });
+        }
+
+        let required = match reader.read_event()? {
+            Event::Empty(tag) => tag.name().as_ref() == b"required",
+            _ => false,
+        };
+
+        Ok(StartTls { xmlns, required })
     }
 }
 
@@ -511,17 +492,18 @@ impl XmlCustomDeserialize for StartTlsResponse {
     fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
 
-        if let Ok(event) = reader.read_event() {
-            match event {
-                Event::Empty(e) => match e.name().as_ref() {
-                    b"proceed" => return Ok(StartTlsResponse::Proceed(StartTlsProceed())),
-                    b"failure" => return Ok(StartTlsResponse::Failure(StartTlsFailure())),
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-        eyre::bail!("invalid response")
+        let tag = match reader.read_event()? {
+            Event::Empty(tag) => tag,
+            _ => eyre::bail!("invalid xml"),
+        };
+
+        let result = match tag.name().as_ref() {
+            b"proceed" => StartTlsResponse::Proceed(StartTlsProceed()),
+            b"failure" => StartTlsResponse::Failure(StartTlsFailure()),
+            _ => eyre::bail!("invalid result"),
+        };
+
+        Ok(result)
     }
 }
 
@@ -590,44 +572,36 @@ impl XmlCustomDeserialize for Authentication {
     fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
 
-        let mut xmlns: Option<String> = None;
-        let mut mechanism: Option<Mechanism> = None;
-        let mut value: Option<String> = None;
-
-        while let Ok(event) = reader.read_event() {
-            match event {
-                Event::Start(e) => {
-                    let name = e.name();
-                    match name.as_ref() {
-                        b"auth" => {
-                            xmlns = e
-                                .try_get_attribute("xmlns")?
-                                .map(|attr| attr.value)
-                                .map(|value| String::from_utf8(value.into()).ok())
-                                .flatten();
-                            mechanism = Some(Mechanism(
-                                std::str::from_utf8(
-                                    &e.try_get_attribute("mechanism").unwrap().unwrap().value,
-                                )
-                                .unwrap()
-                                .to_string(),
-                            ));
-                        }
-                        _ => {}
-                    }
-                }
-                Event::Text(text) => {
-                    value = Some(std::str::from_utf8(&text).unwrap().to_string());
-                }
-                Event::End(_) => break,
-                _ => {}
-            }
+        // <auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="PLAIN">
+        let auth_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            _ => eyre::bail!("invalid xml"),
+        };
+        if auth_start.name().as_ref() != b"auth" {
+            eyre::bail!("invalid tag name")
         }
+        let xmlns = auth_start
+            .try_get_attribute("xmlns")?
+            .ok_or(eyre::eyre!("xmlns not found"))
+            .map(|attr| attr.value)
+            .map(|value| String::from_utf8(value.into()))??;
+        let mechanism = auth_start
+            .try_get_attribute("xmlns")?
+            .ok_or(eyre::eyre!("xmlns not found"))
+            .map(|attr| attr.value)
+            .map(|value| String::from_utf8(value.into()).map(|name| Mechanism(name)))??;
+
+        // {...}
+        let text_tag = match reader.read_event()? {
+            Event::Text(text) => text,
+            _ => eyre::bail!("invalid xml"),
+        };
+        let value = String::from_utf8(text_tag.as_ref().into())?;
 
         Ok(Authentication {
-            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?,
-            mechanism: mechanism.ok_or(eyre::eyre!("mechanism"))?,
-            value: value.unwrap(),
+            xmlns,
+            mechanism,
+            value,
         })
     }
 }
@@ -665,14 +639,14 @@ impl Credentials {
         Self { username, password }
     }
 
-    pub fn deserialize(value: String) -> Self {
+    pub fn from_base64(value: String) -> Self {
         let value = BASE64.decode(value.as_bytes()).unwrap();
         let value = std::str::from_utf8(&value).unwrap();
         let value = value.split("\0").collect::<Vec<&str>>();
         Self::new(value[0].to_string(), value[1].to_string())
     }
 
-    pub fn serialize(&self) -> String {
+    pub fn to_base64(&self) -> String {
         let mut serialized = String::new();
         serialized.push_str(&self.username.as_str());
         serialized.push('\0');
@@ -694,25 +668,23 @@ impl AuthenticationSuccess {
 impl XmlCustomDeserialize for AuthenticationSuccess {
     fn from_string(value: &str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(value);
-        let mut xmlns: Option<String> = None;
 
-        while let Ok(event) = reader.read_event() {
-            match event {
-                Event::Empty(e) => {
-                    xmlns = e
-                        .try_get_attribute("xmlns")?
-                        .map(|attr| attr.value)
-                        .map(|value| String::from_utf8(value.into()).ok())
-                        .flatten();
-                    break;
-                }
-                _ => {}
-            }
+        let tag = match reader.read_event()? {
+            Event::Empty(tag) => tag,
+            _ => eyre::bail!("invalid xml"),
+        };
+
+        if tag.name().as_ref() != b"success" {
+            eyre::bail!("invalid tag name");
         }
 
-        Ok(AuthenticationSuccess {
-            xmlns: xmlns.ok_or(eyre::eyre!("xmlns"))?,
-        })
+        let xmlns = tag
+            .try_get_attribute("xmlns")?
+            .ok_or(eyre::eyre!("xmlns not found"))
+            .map(|attr| attr.value)
+            .map(|value| String::from_utf8(value.into()))??;
+
+        Ok(AuthenticationSuccess { xmlns })
     }
 }
 

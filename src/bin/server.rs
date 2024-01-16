@@ -162,7 +162,7 @@ async fn handshake(
 
     let authentication =
         Authentication::from_string(&authentication).expect("failed to parse authentication");
-    let credentials = Credentials::deserialize(authentication.value);
+    let credentials = Credentials::from_base64(authentication.value);
     let valid = check_credentials(&credentials, &mut db_conn)
         .await
         .expect("failed checking credentials");

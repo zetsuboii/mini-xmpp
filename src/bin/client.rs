@@ -168,7 +168,7 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<()>
                 let authentication = Authentication::new(
                     "urn:ietf:params:xml:ns:xmpp-sasl".into(),
                     Mechanism("PLAIN".into()),
-                    credentials.serialize(),
+                    credentials.to_base64(),
                 )
                 .into_string();
 
