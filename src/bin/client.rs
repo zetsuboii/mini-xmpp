@@ -6,6 +6,7 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use mini_jabber::*;
+use quick_xml::escape::unescape;
 use tokio::{io::AsyncReadExt, net::TcpStream};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
@@ -21,8 +22,6 @@ async fn run_client() {
     let url = url::Url::parse(address).expect("invalid address");
 
     let (ws_stream, _) = connect_async(url).await.expect("failed to connect");
-    println!("websocket handshake has been successfully completed");
-
     let (mut writer, mut reader) = ws_stream.split();
 
     // Do the handshake
@@ -33,38 +32,43 @@ async fn run_client() {
             let response = reader
                 .get_next_text()
                 .await
+                .map(|text| Stanza::try_from(text.as_ref()).ok())
+                .flatten()
                 .expect("failed to get response");
-            println!("\r< {}", response);
-            print!("{}\n> ", "=".repeat(32));
+            let response = match response {
+                Stanza::Message(message) => message,
+                _ => return,
+            };
+
+            let from = response.from.unwrap_or("unknown".to_string());
+            let body = response.body.unwrap_or("".to_string());
+
+            println!("\rfrom: {}", from);
+            println!("< {}", unescape(body.as_ref()).unwrap());
+            print!("{}\nto: ", "=".repeat(32));
             std::io::stdout().lock().flush().expect("failed to flush");
         }
     });
 
     let sender = tokio::spawn(async move {
         loop {
-            let mut input = String::new();
+            // Make a new line
+            print!("{}\nto: ", "=".repeat(32));
+            std::io::stdout().lock().flush().expect("failed to flush");
+            let to = get_line();
 
             // Make a new line
-            print!("{}\n> ", "=".repeat(32));
+            print!("> ");
             std::io::stdout().lock().flush().expect("failed to flush");
-
-            // Read user input
-            std::io::stdin()
-                .lock()
-                .read_line(&mut input)
-                .expect("failed to read to string");
-
-            while input.ends_with("\n") {
-                input.truncate(input.len() - 1);
-            }
+            let input = get_line();
 
             // Send user input
             let message = Stanza::Message(StanzaMessage {
                 id: None,
                 from: Some(jid.clone()),
-                to: Some("some@im.com".to_string()),
+                to: Some(to),
                 body: Some(input),
-                xml_lang: Some("en".to_string())
+                xml_lang: Some("en".to_string()),
             })
             .to_string();
 
@@ -74,7 +78,7 @@ async fn run_client() {
                 .expect("failed to send message");
         }
     });
-    
+
     receiver.await.unwrap();
     sender.await.unwrap();
 }
@@ -96,10 +100,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<Str
     loop {
         match state {
             HandshakeState::Header => {
-                let conn_id = reset_connection(reader, writer)
+                reset_connection(reader, writer)
                     .await
                     .expect("failed to start connection");
-                println!("connection reset: {conn_id}");
                 state = HandshakeState::Features;
             }
             HandshakeState::Features => {
@@ -115,16 +118,6 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<Str
                     state = HandshakeState::Authentication;
                     continue;
                 }
-
-                println!(
-                    "stream mechanisms: {:?}",
-                    features.mechanisms.map(|ms| {
-                        ms.mechanisms
-                            .into_iter()
-                            .map(|m| m.0)
-                            .collect::<Vec<String>>()
-                    })
-                );
 
                 if let Some(tls) = features.start_tls {
                     if tls.required {
@@ -159,10 +152,9 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<Str
                 state = HandshakeState::Authentication;
             }
             HandshakeState::Authentication => {
-                let conn_id = reset_connection(reader, writer)
+                reset_connection(reader, writer)
                     .await
                     .expect("failed to reset connection");
-                println!("connection reset: {conn_id}");
 
                 // Get credentials from stdin
                 let mut username = String::new();
@@ -194,14 +186,14 @@ async fn handshake(reader: &mut Reader, writer: &mut Writer) -> eyre::Result<Str
                     .await
                     .expect("failed to get response");
 
-                AuthenticationSuccess::try_from(auth_response.as_ref()).expect("failed to authenticate");
+                AuthenticationSuccess::try_from(auth_response.as_ref())
+                    .expect("failed to authenticate");
                 state = HandshakeState::ResourceBinding;
             }
             HandshakeState::ResourceBinding => {
-                let conn_id = reset_connection(reader, writer)
+                reset_connection(reader, writer)
                     .await
                     .expect("failed to reset connection");
-                println!("connection reset: {conn_id}");
 
                 let bind_response = bind_resource(reader, writer)
                     .await
@@ -228,9 +220,7 @@ async fn reset_connection(reader: &mut Reader, writer: &mut Writer) -> eyre::Res
     };
 
     // Send StreamHeader to server
-    writer
-        .send(Message::Text(stream_head.to_string()))
-        .await?;
+    writer.send(Message::Text(stream_head.to_string())).await?;
 
     // Get response from the server
     let next = reader
@@ -283,6 +273,22 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
     };
 
     iq_payload.jid.ok_or(eyre::eyre!("jid not found"))
+}
+
+fn get_line() -> String {
+    let mut input = String::new();
+
+    // Read user input
+    std::io::stdin()
+        .lock()
+        .read_line(&mut input)
+        .expect("failed to read to string");
+
+    while input.ends_with("\n") {
+        input.truncate(input.len() - 1);
+    }
+
+    input
 }
 
 // Our helper method which will read data from stdin and send it along the

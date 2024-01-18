@@ -151,8 +151,8 @@ impl TryFrom<&str> for Stanza {
                         eyre::bail!("expected <body>");
                     }
                     // { text }
-                    if let Ok(Event::Text(text_elem)) = reader.read_event() {
-                        let body = String::from_utf8(text_elem.to_vec()).ok();
+                    if let Ok(Event::Text(body_text)) = reader.read_event() {
+                        let body = String::from_utf8(body_text.as_ref().into()).ok();
                         // return parsed
                         Ok(Stanza::Message(StanzaMessage {
                             id,
@@ -257,7 +257,7 @@ impl TryFrom<&str> for Stanza {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StanzaMessage {
     pub id: Option<String>,
     pub from: Option<String>,
@@ -266,19 +266,25 @@ pub struct StanzaMessage {
     pub xml_lang: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct StanzaPresence {
+    pub id: Option<String>,
+    pub from: Option<String>
+}
+
+#[derive(Debug, Clone)]
 pub struct StanzaIq {
     pub id: String,
     pub type_: String,
     pub payload: StanzaIqPayload,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StanzaIqPayload {
     Bind(IqBindPayload),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IqBindPayload {
     pub xmlns: String,
     pub jid: Option<String>,

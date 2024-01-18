@@ -37,8 +37,8 @@ sqlx migrate run
 - [X] Switch to minidom crate for valid XML (used quick-xml instead)
 - [X] XMPP Messaging
 - [X] Authentication
-- [ ] Resource binding
-- [ ] Message delivery
+- [X] Resource binding
+- [X] Message delivery
 - [ ] Friends list
 - [ ] P2P connections with [XEP 1074](https://xmpp.org/extensions/xep-0174.html)
 - [ ] Companion mobile and CLI apps

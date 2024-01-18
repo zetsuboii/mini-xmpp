@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use color_eyre::eyre;
 use dotenvy::dotenv;
@@ -7,6 +7,7 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use mini_jabber::*;
+use quick_xml::escape::unescape;
 use sqlx::pool::PoolConnection;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -66,8 +67,7 @@ async fn run_server() {
     let state = Arc::new(RwLock::new(ServerState::default()));
 
     let tcp_socket = TcpListener::bind(address).await.expect("Failed to bind");
-    println!("listening on {}", address);
-
+    
     while let Ok((stream, _)) = tcp_socket.accept().await {
         tokio::spawn(accept_connection(stream, Arc::clone(&state)));
     }
@@ -81,13 +81,10 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let addr = stream
         .peer_addr()
         .expect("connected streams should have a peer address");
-    println!("peer address: {}", addr);
 
     let ws_stream = tokio_tungstenite::accept_async(stream)
         .await
         .expect("error during the websocket handshake occurred");
-
-    println!("new websocket connection: {}", addr);
 
     let (writer, reader) = ws_stream.split();
     let writer = Arc::new(Mutex::new(writer));
@@ -98,41 +95,56 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
         .unwrap();
 
     // Save client to the state
-    let mut state = state.write().await;
+    let mut state_mut = state.write().await;
 
     let conn_key = jid.address();
-    let conn_val = (*state).connected_clients.get(&conn_key);
+    let conn_val = (*state_mut).connected_clients.get(&conn_key);
     if conn_val.is_none() {
-        (*state)
+        (*state_mut)
             .connected_clients
             .insert(conn_key.clone(), Vec::new());
     }
-    if let Some(conns) = (*state).connected_clients.get_mut(&conn_key) {
-        conns.push(ClientConnection::new(jid.resource_part, Arc::clone(&reader), Arc::clone(&writer)));
+    if let Some(conns) = (*state_mut).connected_clients.get_mut(&conn_key) {
+        conns.push(ClientConnection::new(
+            jid.resource_part,
+            Arc::clone(&reader),
+            Arc::clone(&writer),
+        ));
     }
-    println!("{:?}", &state);
-    drop(state);
+    drop(state_mut);
 
     while let Some(raw_stanza) = reader.lock().await.get_next_text().await {
         // Try to parse stanza
+        let raw_stanza = unescape(&raw_stanza.as_ref()).expect("failed to escape");
         let stanza = Stanza::try_from(raw_stanza.as_ref()).expect("failed to parse stanza");
 
         match stanza {
             Stanza::Message(message) => {
-                println!("< {:?} [{addr}]", message)
+                if let Some(jid) = &message.to {
+                    let state = state.read().await;
+                    let conns = state.connected_clients.get(jid.as_str());
+                    if let Some(conns) = conns {
+                        for conn in conns {
+                            conn.writer()
+                                .lock()
+                                .await
+                                .send(Message::Text(Stanza::Message(message.clone()).to_string()))
+                                .await
+                                .expect("failed to relay message");
+                        }
+                    } else {
+                        writer
+                            .lock()
+                            .await
+                            .send(Message::Text("no such client".to_string()))
+                            .await
+                            .expect("failed to send error");
+                    }
+                }
             }
             Stanza::Iq(_) => println!("< (IQ) [{addr}]"),
             Stanza::Presence => println!("< (Presence) [{addr}]"),
         }
-
-        writer
-            .lock()
-            .await
-            .send(Message::Text("ack".to_string()))
-            .await
-            .expect("failed to send ack");
-
-        println!("> ack");
     }
 }
 
