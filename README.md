@@ -5,6 +5,9 @@ A simple implementation of [XMPP](https://xmpp.org/) (Jabber with its old name) 
 I'm following [RFC 6120](https://datatracker.ietf.org/doc/rfc6120/) directly without any external
 resources to get used to the RFC syntax.
 
+## Demo
+https://github.com/zetsuboii/mini-jabber/assets/12009698/b0302f1f-2556-4390-bc82-9cf401dd29c1
+
 ## Building
 ```bash
 git clone https://github.com/zetsuboii/mini-jabber
