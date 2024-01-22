@@ -62,7 +62,7 @@ async fn main() {
 async fn run_server() {
     dotenv().expect(".env");
 
-    println!(":: websocket server ::");
+    println!(":: xmpp server ::");
     let address = "127.0.0.1:9292";
 
     let state = Arc::new(RwLock::new(ServerState::default()));

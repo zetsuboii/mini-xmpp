@@ -17,7 +17,7 @@ async fn main() {
 }
 
 async fn run_client() {
-    println!(":: websocket client ::");
+    println!(":: xmpp client ::");
     let address = "ws://127.0.0.1:9292";
     let url = url::Url::parse(address).expect("invalid address");
 
