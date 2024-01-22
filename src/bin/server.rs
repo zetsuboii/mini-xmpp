@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Index, sync::Arc};
 
 use color_eyre::eyre;
 use dotenvy::dotenv;
@@ -121,9 +121,23 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
         match stanza {
             Stanza::Message(message) => {
                 if let Some(jid) = &message.to {
+                    let (jid, resource) = if let Some(mid) = jid.find('/') {
+                        let (jid, resource) = jid.split_at(mid);
+                        let resource = &resource[1..];
+                        (jid, resource)
+                    } else {
+                        (jid.as_str(), "")
+                    };
+
                     let state = state.read().await;
-                    let conns = state.connected_clients.get(jid.as_str());
+                    let conns = state.connected_clients.get(jid);
                     if let Some(conns) = conns {
+                        let conns: Vec<&ClientConnection> = if resource.len() > 0 {
+                            conns.iter().filter(|item| item.resource() == resource).collect()
+                        } else {
+                            conns.iter().filter(|_| true).collect()
+                        };
+
                         for conn in conns {
                             conn.writer()
                                 .lock()
