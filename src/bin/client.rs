@@ -39,6 +39,42 @@ async fn run_client() {
         .await
         .expect("failed to send message");
 
+    writer
+        .send(Message::Text(
+            Stanza::Iq(StanzaIq {
+                id: Some(Uuid::new_v4().to_string()),
+                from: Some(jid.clone()),
+                type_: Some("get".to_string()),
+                payload: StanzaIqPayload::Friends(IqFriendsPayload {
+                    xmlns: "https://mini.jabber.com/friends".to_string(),
+                    friend_list: None,
+                }),
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("failed to send iq");
+
+    // Get friend list and show each of them
+    let iq_stanza = reader
+        .get_next_text()
+        .await
+        .expect("failed to get iq response");
+    let iq_stanza = match Stanza::try_from(iq_stanza.as_str()).expect("failed to parse iq") {
+        Stanza::Iq(iq) => iq,
+        _ => unreachable!("invalid iq"),
+    };
+    let friends = match iq_stanza.payload {
+        StanzaIqPayload::Friends(friends) => friends,
+        _ => unreachable!("invalid payload"),
+    };
+    if let Some(list) = friends.friend_list {
+        for friend in list {
+            println!("\r< {} online", friend.to_string());
+        }
+    }
+    println!("{}", "=".repeat(32));
+
     let receiver = tokio::spawn(async move {
         loop {
             let response = reader
@@ -60,7 +96,7 @@ async fn run_client() {
                 Stanza::Presence(presence) => {
                     let from = presence.from.unwrap_or("unknown".to_string());
 
-                    println!("< {} joined the chat", from);
+                    println!("\r< {} now online", from);
                     print!("{}\nto: ", "=".repeat(32));
                     std::io::stdout().lock().flush().expect("failed to flush");
                 }
@@ -72,7 +108,7 @@ async fn run_client() {
     let sender = tokio::spawn(async move {
         loop {
             // Make a new line
-            print!("{}\nto: ", "=".repeat(32));
+            print!("to: ");
             std::io::stdout().lock().flush().expect("failed to flush");
             let to = get_line();
 
@@ -264,8 +300,9 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
 
     // Send Iq that includes bind request, server will assign the resource
     let iq = StanzaIq {
-        id: Uuid::new_v4().to_string(),
-        type_: "set".to_string(),
+        id: Some(Uuid::new_v4().to_string()),
+        from: None,
+        type_: Some("set".to_string()),
         payload: StanzaIqPayload::Bind(IqBindPayload {
             xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
             jid: None,
@@ -289,6 +326,7 @@ async fn bind_resource(reader: &mut Reader, writer: &mut Writer) -> eyre::Result
 
     let iq_payload = match iq_response.payload {
         StanzaIqPayload::Bind(payload) => payload,
+        _ => unreachable!(),
     };
 
     iq_payload.jid.ok_or(eyre::eyre!("jid not found"))

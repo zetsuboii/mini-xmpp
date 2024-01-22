@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Index, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use color_eyre::eyre;
 use dotenvy::dotenv;
@@ -39,6 +39,7 @@ impl ClientConnection {
         self.resource.as_ref()
     }
 
+    #[allow(unused)]
     fn reader(&self) -> &Mutex<Reader> {
         &self.reader
     }
@@ -77,10 +78,6 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let pool = sqlx::SqlitePool::connect(&std::env::var("DATABASE_URL").unwrap())
         .await
         .unwrap();
-
-    let addr = stream
-        .peer_addr()
-        .expect("connected streams should have a peer address");
 
     let ws_stream = tokio_tungstenite::accept_async(stream)
         .await
@@ -159,7 +156,53 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
                     }
                 }
             }
-            Stanza::Iq(_) => println!("< (IQ) [{addr}]"),
+            Stanza::Iq(iq) => match iq.payload {
+                StanzaIqPayload::Friends(_) => {
+                    let state = state.read().await;
+                    let mut friends_list = Vec::new();
+                    let conn_jid = Jid::try_from(iq.from.unwrap().as_str()).expect("failed to parse jid");
+                    for (jid, conns) in &state.connected_clients {
+                        if conn_jid.address() != jid.as_str() {
+                            let (localpart, domainpart) = jid.split_at(jid.find('@').unwrap());
+                            let domainpart = &domainpart[1..];
+
+                            for conn in conns {
+                                friends_list.push(Jid::new(
+                                    localpart.to_string(),
+                                    domainpart.to_string(),
+                                    conn.resource().to_owned(),
+                                ))
+                            }
+                        }
+                    }
+
+                    let payload = IqFriendsPayload {
+                        xmlns: "https://mini.jabber.com/friends".to_string(),
+                        friend_list: Some(friends_list)
+                    };
+                    let stanza = StanzaIq {
+                        id: iq.id,
+                        from: Some(conn_jid.address().to_string()),
+                        type_: Some("result".to_string()),
+                        payload: StanzaIqPayload::Friends(payload)
+                    };
+
+                    writer
+                    .lock()
+                    .await
+                    .send(Message::Text(Stanza::Iq(stanza).to_string()))
+                    .await
+                    .expect("failed to send error"); 
+                }
+                _ => {
+                    writer
+                        .lock()
+                        .await
+                        .send(Message::Text("invalid iq request".to_string()))
+                        .await
+                        .expect("failed to send error");
+                }
+            },
             Stanza::Presence(presence) => {
                 // Send presence to all connected clients
                 let state = state.read().await;
@@ -349,7 +392,8 @@ async fn generate_jid(
     let jid = Jid::new(local_part, domain_part, resource_part);
     let bind_response = Stanza::Iq(StanzaIq {
         id: bind_request.id,
-        type_: "result".to_string(),
+        from: None,
+        type_: Some("result".to_string()),
         payload: StanzaIqPayload::Bind(IqBindPayload {
             xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
             jid: Some(jid.to_string()),

@@ -39,6 +39,6 @@ sqlx migrate run
 - [X] Authentication
 - [X] Resource binding
 - [X] Message delivery
-- [ ] Friends list
+- [X] Friends list
 - [ ] P2P connections with [XEP 1074](https://xmpp.org/extensions/xep-0174.html)
 - [ ] Companion mobile and CLI apps

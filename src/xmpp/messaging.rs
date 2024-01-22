@@ -6,7 +6,7 @@ use quick_xml::{
     Reader, Writer,
 };
 
-use crate::{try_get_attribute, Collect};
+use crate::{try_get_attribute, Collect, Jid};
 
 #[derive(Debug)]
 pub enum Stanza {
@@ -59,12 +59,24 @@ impl ToString for Stanza {
                     .unwrap();
             }
             Self::Iq(iq) => {
-                let StanzaIq { id, type_, payload } = iq;
+                let StanzaIq {
+                    id,
+                    from,
+                    type_,
+                    payload,
+                } = iq;
 
                 // <iq id={...} type={...}>
                 let mut iq_header = BytesStart::new("iq");
-                iq_header.push_attribute(("id", id.as_ref()));
-                iq_header.push_attribute(("type", type_.as_ref()));
+                if let Some(id) = id {
+                    iq_header.push_attribute(("id", id.as_ref()));
+                }
+                if let Some(from) = from {
+                    iq_header.push_attribute(("from", from.as_ref()));
+                }
+                if let Some(type_) = type_ {
+                    iq_header.push_attribute(("type", type_.as_ref()));
+                }
                 writer.write_event(Event::Start(iq_header)).unwrap();
 
                 match payload {
@@ -111,6 +123,40 @@ impl ToString for Stanza {
                             writer
                                 .write_event(Event::End(BytesEnd::new("bind")))
                                 .unwrap();
+                        }
+                    }
+                    StanzaIqPayload::Friends(payload) => {
+                        let IqFriendsPayload { xmlns, friend_list } = payload;
+                        let mut friends_start = BytesStart::new("friends");
+                        friends_start.push_attribute(("xmlns", xmlns.as_ref()));
+
+                        if let Some(friend_list) = friend_list {
+                            // <friends>
+                            writer.write_event(Event::Start(friends_start)).unwrap();
+
+                            for friend in friend_list {
+                                // <jid>
+                                writer
+                                    .write_event(Event::Start(BytesStart::new("jid")))
+                                    .unwrap();
+                                // {...}
+                                writer
+                                    .write_event(Event::Text(BytesText::new(
+                                        friend.to_string().as_str(),
+                                    )))
+                                    .unwrap();
+                                // </jid>
+                                writer
+                                    .write_event(Event::End(BytesEnd::new("jid")))
+                                    .unwrap();
+                            }
+
+                            // </friends>
+                            let friends_end = BytesEnd::new("friends");
+                            writer.write_event(Event::End(friends_end)).unwrap();
+                        } else {
+                            // <friends />
+                            writer.write_event(Event::Empty(friends_start)).unwrap();
                         }
                     }
                 }
@@ -184,7 +230,9 @@ impl TryFrom<&str> for Stanza {
             }
             b"iq" => {
                 // attribute `id`
-                let id = try_get_attribute(&start_tag, "id").expect("id");
+                let id = try_get_attribute(&start_tag, "id").ok();
+                // attribute `from`
+                let from = try_get_attribute(&start_tag, "from").ok();
                 // attribute `type`
                 let type_ = try_get_attribute(&start_tag, "type").expect("type");
 
@@ -192,19 +240,35 @@ impl TryFrom<&str> for Stanza {
 
                 while let Ok(payload_event) = reader.read_event() {
                     match payload_event {
-                        Event::Empty(tag) => {
-                            let xmlns = tag
-                                .try_get_attribute("xmlns")
-                                .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
-                                .map(|attr| attr.value)
-                                .map(|value| String::from_utf8(value.into()))??;
+                        Event::Empty(tag) => match tag.name().as_ref() {
+                            // <bind />
+                            b"bind" => {
+                                let xmlns = tag
+                                    .try_get_attribute("xmlns")
+                                    .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
 
-                            iq_payload = Some(StanzaIqPayload::Bind(IqBindPayload {
-                                xmlns,
-                                jid: None,
-                                resource: None,
-                            }));
-                        }
+                                iq_payload = Some(StanzaIqPayload::Bind(IqBindPayload {
+                                    xmlns,
+                                    jid: None,
+                                    resource: None,
+                                }));
+                            }
+                            b"friends" => {
+                                let xmlns = tag
+                                    .try_get_attribute("xmlns")
+                                    .map(|attr| attr.ok_or(eyre::eyre!("attr not found")))?
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
+
+                                iq_payload = Some(StanzaIqPayload::Friends(IqFriendsPayload {
+                                    xmlns,
+                                    friend_list: None,
+                                }));
+                            }
+                            _ => {}
+                        },
                         Event::Start(tag) => match tag.name().as_ref() {
                             b"bind" => {
                                 let xmlns = tag
@@ -248,6 +312,49 @@ impl TryFrom<&str> for Stanza {
                                 }
                                 iq_payload = Some(StanzaIqPayload::Bind(bind_payload));
                             }
+                            b"friends" => {
+                                let xmlns = tag
+                                    .try_get_attribute("xmlns")?
+                                    .ok_or(eyre::eyre!("xmlns not found"))
+                                    .map(|attr| attr.value)
+                                    .map(|value| String::from_utf8(value.into()))??;
+
+                                let mut friends_payload = IqFriendsPayload {
+                                    xmlns,
+                                    friend_list: None,
+                                };
+
+                                let mut friend_list = Vec::new();
+                                while let Ok(bind_event) = reader.read_event() {
+                                    match bind_event {
+                                        Event::Start(tag) => {
+                                            if tag.name().as_ref() == b"jid" {
+                                                let text_event = reader.read_event();
+                                                if let Ok(Event::Text(text)) = text_event {
+                                                    friend_list.push(
+                                                        Jid::try_from(
+                                                            std::str::from_utf8(text.as_ref())
+                                                                .unwrap(),
+                                                        )
+                                                        .unwrap(),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Event::End(tag) => {
+                                            if tag.name().as_ref() == b"friends" {
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+
+                                if friend_list.len() > 0 {
+                                    friends_payload.friend_list = Some(friend_list)
+                                }
+                                iq_payload = Some(StanzaIqPayload::Friends(friends_payload));
+                            }
                             _ => {}
                         },
                         Event::End(tag) => {
@@ -261,7 +368,8 @@ impl TryFrom<&str> for Stanza {
 
                 Ok(Stanza::Iq(StanzaIq {
                     id,
-                    type_,
+                    from,
+                    type_: Some(type_),
                     payload: iq_payload.expect("found empty payload"),
                 }))
             }
@@ -292,14 +400,16 @@ pub struct StanzaPresence {
 
 #[derive(Debug, Clone)]
 pub struct StanzaIq {
-    pub id: String,
-    pub type_: String,
+    pub id: Option<String>,
+    pub from: Option<String>,
+    pub type_: Option<String>,
     pub payload: StanzaIqPayload,
 }
 
 #[derive(Debug, Clone)]
 pub enum StanzaIqPayload {
     Bind(IqBindPayload),
+    Friends(IqFriendsPayload),
 }
 
 #[derive(Debug, Clone)]
@@ -307,4 +417,10 @@ pub struct IqBindPayload {
     pub xmlns: String,
     pub jid: Option<String>,
     pub resource: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IqFriendsPayload {
+    pub xmlns: String,
+    pub friend_list: Option<Vec<Jid>>,
 }
