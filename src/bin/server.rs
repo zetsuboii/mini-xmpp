@@ -67,7 +67,7 @@ async fn run_server() {
     let state = Arc::new(RwLock::new(ServerState::default()));
 
     let tcp_socket = TcpListener::bind(address).await.expect("Failed to bind");
-    
+
     while let Ok((stream, _)) = tcp_socket.accept().await {
         tokio::spawn(accept_connection(stream, Arc::clone(&state)));
     }
@@ -90,14 +90,14 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let writer = Arc::new(Mutex::new(writer));
     let reader = Arc::new(Mutex::new(reader));
 
-    let jid = handshake(&Arc::clone(&reader), &Arc::clone(&writer), &pool)
+    let conn_jid = handshake(&Arc::clone(&reader), &Arc::clone(&writer), &pool)
         .await
         .unwrap();
 
     // Save client to the state
     let mut state_mut = state.write().await;
 
-    let conn_key = jid.address();
+    let conn_key = conn_jid.address();
     let conn_val = (*state_mut).connected_clients.get(&conn_key);
     if conn_val.is_none() {
         (*state_mut)
@@ -106,7 +106,7 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     }
     if let Some(conns) = (*state_mut).connected_clients.get_mut(&conn_key) {
         conns.push(ClientConnection::new(
-            jid.resource_part,
+            conn_jid.resource_part().to_owned(),
             Arc::clone(&reader),
             Arc::clone(&writer),
         ));
@@ -133,7 +133,10 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
                     let conns = state.connected_clients.get(jid);
                     if let Some(conns) = conns {
                         let conns: Vec<&ClientConnection> = if resource.len() > 0 {
-                            conns.iter().filter(|item| item.resource() == resource).collect()
+                            conns
+                                .iter()
+                                .filter(|item| item.resource() == resource)
+                                .collect()
                         } else {
                             conns.iter().filter(|_| true).collect()
                         };
@@ -157,7 +160,26 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
                 }
             }
             Stanza::Iq(_) => println!("< (IQ) [{addr}]"),
-            Stanza::Presence => println!("< (Presence) [{addr}]"),
+            Stanza::Presence(presence) => {
+                // Send presence to all connected clients
+                let state = state.read().await;
+                for (jid, conns) in &state.connected_clients {
+                    if jid == conn_jid.address().as_str() {
+                        continue;
+                    }
+
+                    for conn in conns {
+                        conn.writer()
+                            .lock()
+                            .await
+                            .send(Message::Text(
+                                Stanza::Presence(presence.clone()).to_string(),
+                            ))
+                            .await
+                            .expect("failed to relay message");
+                    }
+                }
+            }
         }
     }
 }

@@ -27,6 +27,18 @@ async fn run_client() {
     // Do the handshake
     let jid = handshake(&mut reader, &mut writer).await.unwrap();
 
+    // Send presence message
+    writer
+        .send(Message::Text(
+            Stanza::Presence(StanzaPresence {
+                id: None,
+                from: Some(jid.clone()),
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("failed to send message");
+
     let receiver = tokio::spawn(async move {
         loop {
             let response = reader
@@ -35,18 +47,25 @@ async fn run_client() {
                 .map(|text| Stanza::try_from(text.as_ref()).ok())
                 .flatten()
                 .expect("failed to get response");
-            let response = match response {
-                Stanza::Message(message) => message,
+            match response {
+                Stanza::Message(message) => {
+                    let from = message.from.unwrap_or("unknown".to_string());
+                    let body = message.body.unwrap_or("".to_string());
+
+                    println!("\rfrom: {}", from);
+                    println!("< {}", unescape(body.as_ref()).unwrap());
+                    print!("{}\nto: ", "=".repeat(32));
+                    std::io::stdout().lock().flush().expect("failed to flush");
+                }
+                Stanza::Presence(presence) => {
+                    let from = presence.from.unwrap_or("unknown".to_string());
+
+                    println!("< {} joined the chat", from);
+                    print!("{}\nto: ", "=".repeat(32));
+                    std::io::stdout().lock().flush().expect("failed to flush");
+                }
                 _ => return,
             };
-
-            let from = response.from.unwrap_or("unknown".to_string());
-            let body = response.body.unwrap_or("".to_string());
-
-            println!("\rfrom: {}", from);
-            println!("< {}", unescape(body.as_ref()).unwrap());
-            print!("{}\nto: ", "=".repeat(32));
-            std::io::stdout().lock().flush().expect("failed to flush");
         }
     });
 

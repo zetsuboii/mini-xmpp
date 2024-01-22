@@ -17,6 +17,10 @@ impl Jid {
     pub fn address(&self) -> String {
         format!("{}@{}", self.local_part, self.domain_part)
     }
+
+    pub fn resource_part(&self) -> &str {
+        self.resource_part.as_ref()
+    }
 }
 
 impl ToString for Jid {

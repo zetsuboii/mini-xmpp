@@ -11,7 +11,7 @@ use crate::{try_get_attribute, Collect};
 #[derive(Debug)]
 pub enum Stanza {
     Message(StanzaMessage),
-    Presence,
+    Presence(StanzaPresence),
     Iq(StanzaIq),
 }
 
@@ -119,8 +119,22 @@ impl ToString for Stanza {
                 let iq_end = BytesEnd::new("iq");
                 writer.write_event(Event::End(iq_end)).unwrap();
             }
-            Self::Presence => {
-                todo!()
+            Self::Presence(presence) => {
+                let StanzaPresence { id, from } = presence;
+
+                // <presence id={...} from={...}>
+                let mut presence_header = BytesStart::new("presence");
+                if let Some(id) = id {
+                    presence_header.push_attribute(("id", id.as_ref()));
+                }
+                if let Some(from) = from {
+                    presence_header.push_attribute(("from", from.as_ref()));
+                }
+                writer.write_event(Event::Start(presence_header)).unwrap();
+
+                // </presence>
+                let presence_end = BytesEnd::new("presence");
+                writer.write_event(Event::End(presence_end)).unwrap();
             }
         }
 
@@ -170,9 +184,9 @@ impl TryFrom<&str> for Stanza {
             }
             b"iq" => {
                 // attribute `id`
-                let iq_id = try_get_attribute(&start_tag, "id").expect("id");
+                let id = try_get_attribute(&start_tag, "id").expect("id");
                 // attribute `type`
-                let iq_type = try_get_attribute(&start_tag, "type").expect("type");
+                let type_ = try_get_attribute(&start_tag, "type").expect("type");
 
                 let mut iq_payload: Option<StanzaIqPayload> = None;
 
@@ -246,12 +260,16 @@ impl TryFrom<&str> for Stanza {
                 }
 
                 Ok(Stanza::Iq(StanzaIq {
-                    type_: iq_type,
-                    id: iq_id,
+                    id,
+                    type_,
                     payload: iq_payload.expect("found empty payload"),
                 }))
             }
-            b"presence" => todo!(),
+            b"presence" => {
+                let id = try_get_attribute(&start_tag, "id").ok();
+                let from = try_get_attribute(&start_tag, "from").ok();
+                Ok(Stanza::Presence(StanzaPresence { id, from }))
+            }
             _ => eyre::bail!("invalid stanza"),
         }
     }
@@ -269,7 +287,7 @@ pub struct StanzaMessage {
 #[derive(Debug, Clone)]
 pub struct StanzaPresence {
     pub id: Option<String>,
-    pub from: Option<String>
+    pub from: Option<String>,
 }
 
 #[derive(Debug, Clone)]
