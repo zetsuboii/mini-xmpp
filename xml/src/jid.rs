@@ -1,5 +1,8 @@
 use color_eyre::eyre;
+use quick_xml::{de::from_str, se::to_string};
 use serde::{Deserialize, Serialize};
+
+use crate::from_xml::{FromXml, ToXml};
 
 /// XMPP address of the form <localpart@domainpart/resourcepart>
 #[derive(Debug, Clone, Default)]
@@ -116,6 +119,22 @@ impl<'de> Deserialize<'de> for Jid {
     {
         // TODO: There's no trivial way to map eyre::ErrReport to D::Error
         JidXml::deserialize(deserializer).map(|jid| Jid::try_from(jid.inner).unwrap())
+    }
+}
+
+impl ToXml for Jid {
+    fn to_xml(&self) -> String {
+        to_string(self).expect("failed to convert to string")
+    }
+}
+
+impl<T: AsRef<str>> FromXml<T> for Jid {
+    type Out = Self;
+
+    fn from_xml(value: T) -> eyre::Result<Self> {
+        from_str(value.as_ref())
+            .map(|v| v)
+            .map_err(|_| eyre::eyre!("failed to decode"))
     }
 }
 
