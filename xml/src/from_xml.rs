@@ -42,9 +42,6 @@ pub trait WriteXml<W = Cursor<Vec<u8>>, Out = ()> {
     fn write_xml(&self, writer: &mut Writer<W>) -> eyre::Result<Out>;
 }
 
-/// Blanket implementation for `WriteXmlString` for all `WriteXml` types
-impl <T: WriteXml> WriteXmlString for T {}
-
 pub trait WriteXmlString: WriteXml {
     /// Writes XML to a string
     fn write_xml_string(&self) -> eyre::Result<String> {
@@ -53,3 +50,6 @@ pub trait WriteXmlString: WriteXml {
         Ok(writer.collect())
     }
 }
+
+/// Blanket implementation for `WriteXmlString` for all `WriteXml` types
+impl <T: WriteXml> WriteXmlString for T {}

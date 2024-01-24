@@ -1,3 +1,5 @@
+//! Initial header to start XMPP connection
+
 use color_eyre::eyre;
 use std::io::Cursor;
 

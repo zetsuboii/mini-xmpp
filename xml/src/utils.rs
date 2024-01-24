@@ -24,7 +24,7 @@ impl Collect for Writer<Cursor<Vec<u8>>> {
 pub fn try_get_attribute(tag: &BytesStart, attribute: &'static str) -> eyre::Result<String> {
     Ok(tag
         .try_get_attribute(attribute)?
-        .ok_or(eyre::eyre!("xmlns not found"))
+        .ok_or(eyre::eyre!("attribute {} not found", attribute))
         .map(|attr| attr.value)
         .map(|value| String::from_utf8(value.into()))??)
 }
