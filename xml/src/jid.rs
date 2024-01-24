@@ -9,7 +9,7 @@ use quick_xml::{
 use crate::from_xml::{ReadXml, WriteXml};
 
 /// XMPP address of the form <localpart@domainpart/resourcepart>
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Jid {
     pub local_part: String,
     pub domain_part: String,

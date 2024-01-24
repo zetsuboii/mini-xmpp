@@ -1,4 +1,4 @@
-use std::{fmt::Write, io::Cursor};
+use std::io::Cursor;
 
 use color_eyre::eyre;
 use quick_xml::{
@@ -22,17 +22,49 @@ pub struct Iq {
     pub payload: IqPayload,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IqPayload {
     Bind(Bind),
     Friends(Friends),
+}
+
+impl ReadXml<'_> for IqPayload {
+    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let payload_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            Event::Empty(tag) => tag,
+            _ => eyre::bail!("invalid start event"),
+        };
+
+        Self::read_xml_from_start(payload_start, reader)
+    }
+
+    fn read_xml_from_start<'a>(
+        start: BytesStart<'a>,
+        reader: &mut quick_xml::Reader<&[u8]>,
+    ) -> color_eyre::eyre::Result<Self> {
+        match start.name().as_ref() {
+            b"bind" => Ok(Self::Bind(Bind::read_xml_from_start(start, reader)?)),
+            b"friends" => Ok(Self::Friends(Friends::read_xml_from_start(start, reader)?)),
+            _ => eyre::bail!("invalid tag name"),
+        }
+    }
+}
+
+impl WriteXml for IqPayload {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        match self {
+            Self::Bind(bind) => bind.write_xml(writer),
+            Self::Friends(friends) => friends.write_xml(writer),
+        }
+    }
 }
 
 //
 // bind
 //
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Bind {
     pub xmlns: String,
     pub jid: Option<Jid>,
@@ -142,7 +174,7 @@ impl WriteXml for Bind {
 // friends
 //
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Friends {
     pub xmlns: String,
     pub friend_list: Option<Vec<Jid>>,
@@ -235,6 +267,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_iq_payload() {
+        let xml = r#"<bind xmlns="urn:ietf:params:xml:ns:xmpp-bind">
+            <jid> alice@mail.com </jid>
+            <resource> phone </resource>
+        </bind>"#;
+
+        let payload = IqPayload::read_xml_string(xml).unwrap();
+        assert_eq!(
+            payload,
+            IqPayload::Bind(Bind {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                jid: Some(Jid::new("alice", "mail.com")),
+                resource: Some("phone".to_string()),
+            })
+        );
+    }
+
+    #[test]
     fn test_bind() {
         let xml = r#"<bind xmlns="urn:ietf:params:xml:ns:xmpp-bind">
             <jid>alice@mail.com</jid>
@@ -242,9 +292,14 @@ mod tests {
         </bind>"#;
 
         let bind = Bind::read_xml_string(xml).unwrap();
-        assert_eq!(bind.xmlns, "urn:ietf:params:xml:ns:xmpp-bind");
-        assert_eq!(bind.jid.unwrap().to_string(), "alice@mail.com".to_string());
-        assert_eq!(bind.resource, Some("phone".to_string()));
+        assert_eq!(
+            bind,
+            Bind {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                jid: Some(Jid::new("alice", "mail.com")),
+                resource: Some("phone".to_string()),
+            }
+        );
 
         let mut bind = Bind::new("urn:ietf:params:xml:ns:xmpp-bind".to_string());
         bind.jid = Some(Jid::new("zet", "mail"));
@@ -257,7 +312,8 @@ mod tests {
                 "<jid>zet@mail</jid>",
                 "<resource>phone</resource>",
                 "</bind>"
-            ].concat()
+            ]
+            .concat()
         );
     }
 
@@ -269,13 +325,16 @@ mod tests {
         </friends>"#;
 
         let friends = Friends::read_xml_string(xml).unwrap();
-        assert_eq!(friends.xmlns, "mini.jabber.com/friends");
-
-        let friend_list = friends.friend_list.unwrap();
-        let alice = &friend_list[0];
-        assert_eq!(alice.local_part(), "alice");
-        assert_eq!(alice.domain_part(), "mail.com");
-        assert_eq!(alice.resource_part(), Some(&"phone".to_string()));
+        assert_eq!(
+            friends,
+            Friends {
+                xmlns: "mini.jabber.com/friends".to_string(),
+                friend_list: Some(vec![
+                    Jid::new("alice", "mail.com").with_resource("phone"),
+                    Jid::new("bob", "mail.com").with_resource("phone"),
+                ]),
+            }
+        );
     }
 
     #[test]
