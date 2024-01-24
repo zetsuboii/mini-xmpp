@@ -1,10 +1,10 @@
+use self::iq::Iq;
 use self::message::Message;
 use self::presence::Presence;
-use self::iq::Iq;
 
+mod iq;
 mod message;
 mod presence;
-mod iq;
 
 /// Basic unit of communication in XMPP.
 /// They are the equivalent of HTTP requests and responses.

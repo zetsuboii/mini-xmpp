@@ -14,14 +14,109 @@ use crate::{
     utils::try_get_attribute,
 };
 
-#[derive(Debug, Clone)]
+/// Represents an IQ stanza in XMPP, which is used for sending queries or
+/// commands and receiving responses.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Iq {
     pub id: Option<String>,
     pub from: Option<String>,
     pub type_: Option<String>,
-    pub payload: IqPayload,
+    pub payload: Option<IqPayload>,
 }
 
+impl Iq {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl ReadXml<'_> for Iq {
+    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let iq_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            Event::Empty(tag) => tag,
+            _ => eyre::bail!("invalid start event"),
+        };
+
+        Self::read_xml_from_start(iq_start, reader)
+    }
+
+    fn read_xml_from_start<'a>(
+        start: BytesStart<'a>,
+        reader: &mut Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        if start.name().as_ref() != b"iq" {
+            eyre::bail!("invalid start tag")
+        }
+
+        let mut result = Self::new();
+        result.id = try_get_attribute(&start, "id").ok();
+        result.from = try_get_attribute(&start, "from").ok();
+        result.type_ = try_get_attribute(&start, "type").ok();
+
+        while let Ok(event) = reader.read_event() {
+            match event {
+                Event::Start(tag) => match tag.name().as_ref() {
+                    // <bind>
+                    b"bind" => {
+                        result.payload =
+                            Some(IqPayload::Bind(Bind::read_xml_from_start(tag, reader)?))
+                    }
+                    // <friends>
+                    b"friends" => {
+                        result.payload = Some(IqPayload::Friends(Friends::read_xml_from_start(
+                            tag, reader,
+                        )?))
+                    }
+                    _ => eyre::bail!("invalid tag name"),
+                },
+                Event::End(tag) => {
+                    if tag.name().as_ref() != b"iq" {
+                        eyre::bail!("invalid end tag")
+                    }
+                    break;
+                }
+                Event::Eof => eyre::bail!("unexpected EOF"),
+                _ => {}
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl WriteXml for Iq {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        let mut iq_start = BytesStart::new("iq");
+        if let Some(id) = &self.id {
+            iq_start.push_attribute(("id", id.as_str()));
+        }
+        if let Some(from) = &self.from {
+            iq_start.push_attribute(("from", from.as_str()));
+        }
+        if let Some(type_) = &self.type_ {
+            iq_start.push_attribute(("type", type_.as_str()));
+        }
+
+        if let Some(payload) = &self.payload {
+            // <iq>
+            writer.write_event(Event::Start(iq_start))?;
+
+            // <bind>
+            payload.write_xml(writer)?;
+
+            // </iq>
+            writer.write_event(Event::End(BytesEnd::new("iq")))?;
+        } else {
+            // <iq />
+            writer.write_event(Event::Empty(iq_start))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Possible payloads for an IQ stanza.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IqPayload {
     Bind(Bind),
@@ -64,6 +159,8 @@ impl WriteXml for IqPayload {
 // bind
 //
 
+/// Represents the 'bind' element in XMPP, which is used for resource binding
+/// during session establishment.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Bind {
     pub xmlns: String,
@@ -174,6 +271,7 @@ impl WriteXml for Bind {
 // friends
 //
 
+/// Represents a custom 'friends' element, used to get friends list of a user.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Friends {
     pub xmlns: String,
@@ -267,6 +365,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_iq() {
+        let xml = r#"<iq id="123" from="alice@mail" type="set">
+            <bind xmlns="urn:ietf:params:xml:ns:xmpp-bind">
+                <jid> alice@mail.com </jid>
+                <resource> phone </resource>
+            </bind>
+        </iq>"#;
+
+        let iq = Iq::read_xml_string(xml).unwrap();
+        assert_eq!(
+            iq,
+            Iq {
+                id: Some("123".to_string()),
+                from: Some("alice@mail".to_string()),
+                type_: Some("set".to_string()),
+                payload: Some(IqPayload::Bind(Bind {
+                    xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                    jid: Some(Jid::new("alice", "mail.com")),
+                    resource: Some("phone".to_string()),
+                })),
+            }
+        );
+    }
+
+    #[test]
     fn test_iq_payload() {
         let xml = r#"<bind xmlns="urn:ietf:params:xml:ns:xmpp-bind">
             <jid> alice@mail.com </jid>
@@ -274,11 +397,14 @@ mod tests {
         </bind>"#;
 
         let payload = IqPayload::read_xml_string(xml).unwrap();
-        assert_eq!(payload, IqPayload::Bind(Bind {
-            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
-            jid: Some(Jid::new("alice", "mail.com")),
-            resource: Some("phone".to_string()),
-        }));
+        assert_eq!(
+            payload,
+            IqPayload::Bind(Bind {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                jid: Some(Jid::new("alice", "mail.com")),
+                resource: Some("phone".to_string()),
+            })
+        );
     }
 
     #[test]
@@ -289,11 +415,14 @@ mod tests {
         </bind>"#;
 
         let bind = Bind::read_xml_string(xml).unwrap();
-        assert_eq!(bind, Bind {
-            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
-            jid: Some(Jid::new("alice", "mail.com")),
-            resource: Some("phone".to_string()),
-        });
+        assert_eq!(
+            bind,
+            Bind {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                jid: Some(Jid::new("alice", "mail.com")),
+                resource: Some("phone".to_string()),
+            }
+        );
 
         let mut bind = Bind::new("urn:ietf:params:xml:ns:xmpp-bind".to_string());
         bind.jid = Some(Jid::new("zet", "mail"));
@@ -319,13 +448,16 @@ mod tests {
         </friends>"#;
 
         let friends = Friends::read_xml_string(xml).unwrap();
-        assert_eq!(friends, Friends {
-            xmlns: "mini.jabber.com/friends".to_string(),
-            friend_list: Some(vec![
-                Jid::new("alice", "mail.com").with_resource("phone"),
-                Jid::new("bob", "mail.com").with_resource("phone"),
-            ]),
-        });
+        assert_eq!(
+            friends,
+            Friends {
+                xmlns: "mini.jabber.com/friends".to_string(),
+                friend_list: Some(vec![
+                    Jid::new("alice", "mail.com").with_resource("phone"),
+                    Jid::new("bob", "mail.com").with_resource("phone"),
+                ]),
+            }
+        );
     }
 
     #[test]
