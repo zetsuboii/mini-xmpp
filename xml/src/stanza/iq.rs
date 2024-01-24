@@ -1,13 +1,17 @@
-use std::io::Cursor;
+use std::{fmt::Write, io::Cursor};
 
 use color_eyre::eyre;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, Event},
+    events::{BytesEnd, BytesStart, BytesText, Event},
+    name::QName,
     Reader, Writer,
 };
 
 use crate::{
-    from_xml::{ReadXml, WriteXml}, jid::Jid, utils::try_get_attribute
+    empty::IsEmpty,
+    from_xml::{ReadXml, WriteXml},
+    jid::Jid,
+    utils::try_get_attribute,
 };
 
 #[derive(Debug, Clone)]
@@ -24,11 +28,114 @@ pub enum IqPayload {
     Friends(Friends),
 }
 
-#[derive(Debug, Clone)]
+//
+// bind
+//
+
+#[derive(Default, Debug, Clone)]
 pub struct Bind {
     pub xmlns: String,
-    pub jid: Option<String>,
+    pub jid: Option<Jid>,
     pub resource: Option<String>,
+}
+
+impl Bind {
+    pub fn new(xmlns: String) -> Self {
+        Self {
+            xmlns,
+            ..Default::default()
+        }
+    }
+}
+
+impl IsEmpty for Bind {
+    fn is_empty(&self) -> bool {
+        self.jid.is_none() && self.resource.is_none()
+    }
+}
+
+impl ReadXml<'_> for Bind {
+    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let bind_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            Event::Empty(tag) => tag,
+            _ => eyre::bail!("invalid start event"),
+        };
+
+        Self::read_xml_from_start(bind_start, reader)
+    }
+
+    fn read_xml_from_start<'a>(
+        start: BytesStart<'a>,
+        reader: &mut quick_xml::Reader<&[u8]>,
+    ) -> color_eyre::eyre::Result<Self> {
+        if start.name().as_ref() != b"bind" {
+            eyre::bail!("invalid start tag")
+        }
+
+        let xmlns = try_get_attribute(&start, "xmlns")?;
+        let mut result = Self::new(xmlns);
+
+        while let Ok(event) = reader.read_event() {
+            match event {
+                Event::Start(tag) => match tag.name().as_ref() {
+                    // <jid>
+                    b"jid" => result.jid = Some(Jid::read_xml_from_start(tag, reader)?),
+                    // <resource>
+                    b"resource" => {
+                        let resource = reader
+                            .read_text(QName(b"resource"))
+                            .map(|res| res.trim().to_string())?;
+                        result.resource = Some(resource);
+                    }
+                    _ => eyre::bail!("invalid tag name"),
+                },
+                // </bind>
+                Event::End(tag) => {
+                    if tag.name().as_ref() != b"bind" {
+                        eyre::bail!("invalid end tag")
+                    }
+                    break;
+                }
+                Event::Eof => eyre::bail!("unexpected EOF"),
+                _ => {}
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl WriteXml for Bind {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        let mut bind_start = BytesStart::new("bind");
+        bind_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+
+        if self.is_empty() {
+            // <bind />
+            writer.write_event(Event::Empty(bind_start))?;
+        } else {
+            // <bind>
+            writer.write_event(Event::Start(bind_start))?;
+
+            // <jid>
+            if let Some(jid) = &self.jid {
+                jid.write_xml(writer)?;
+            }
+
+            // <resource>
+            if let Some(resource) = &self.resource {
+                writer.write_event(Event::Start(BytesStart::new("resource")))?;
+                writer.write_event(Event::Text(BytesText::new(resource.as_str())))?;
+                writer.write_event(Event::End(BytesEnd::new("resource")))?;
+            }
+
+            // </bind>
+            writer.write_event(Event::End(BytesEnd::new("bind")))?;
+        }
+
+        Ok(())
+    }
 }
 
 //
@@ -123,9 +230,36 @@ impl WriteXml for Friends {
 
 #[cfg(test)]
 mod tests {
-    use crate::from_xml::ReadXmlString;
+    use crate::from_xml::{ReadXmlString, WriteXmlString};
 
     use super::*;
+
+    #[test]
+    fn test_bind() {
+        let xml = r#"<bind xmlns="urn:ietf:params:xml:ns:xmpp-bind">
+            <jid>alice@mail.com</jid>
+            <resource>phone</resource>
+        </bind>"#;
+
+        let bind = Bind::read_xml_string(xml).unwrap();
+        assert_eq!(bind.xmlns, "urn:ietf:params:xml:ns:xmpp-bind");
+        assert_eq!(bind.jid.unwrap().to_string(), "alice@mail.com".to_string());
+        assert_eq!(bind.resource, Some("phone".to_string()));
+
+        let mut bind = Bind::new("urn:ietf:params:xml:ns:xmpp-bind".to_string());
+        bind.jid = Some(Jid::new("zet", "mail"));
+        bind.resource = Some("phone".to_string());
+        let xml = bind.write_xml_string().unwrap();
+        assert_eq!(
+            xml,
+            [
+                "<bind xmlns=\"urn:ietf:params:xml:ns:xmpp-bind\">",
+                "<jid>zet@mail</jid>",
+                "<resource>phone</resource>",
+                "</bind>"
+            ].concat()
+        );
+    }
 
     #[test]
     fn test_friends() {
