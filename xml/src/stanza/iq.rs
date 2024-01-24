@@ -274,14 +274,11 @@ mod tests {
         </bind>"#;
 
         let payload = IqPayload::read_xml_string(xml).unwrap();
-        assert_eq!(
-            payload,
-            IqPayload::Bind(Bind {
-                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
-                jid: Some(Jid::new("alice", "mail.com")),
-                resource: Some("phone".to_string()),
-            })
-        );
+        assert_eq!(payload, IqPayload::Bind(Bind {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+            jid: Some(Jid::new("alice", "mail.com")),
+            resource: Some("phone".to_string()),
+        }));
     }
 
     #[test]
@@ -292,14 +289,11 @@ mod tests {
         </bind>"#;
 
         let bind = Bind::read_xml_string(xml).unwrap();
-        assert_eq!(
-            bind,
-            Bind {
-                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
-                jid: Some(Jid::new("alice", "mail.com")),
-                resource: Some("phone".to_string()),
-            }
-        );
+        assert_eq!(bind, Bind {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+            jid: Some(Jid::new("alice", "mail.com")),
+            resource: Some("phone".to_string()),
+        });
 
         let mut bind = Bind::new("urn:ietf:params:xml:ns:xmpp-bind".to_string());
         bind.jid = Some(Jid::new("zet", "mail"));
@@ -325,16 +319,13 @@ mod tests {
         </friends>"#;
 
         let friends = Friends::read_xml_string(xml).unwrap();
-        assert_eq!(
-            friends,
-            Friends {
-                xmlns: "mini.jabber.com/friends".to_string(),
-                friend_list: Some(vec![
-                    Jid::new("alice", "mail.com").with_resource("phone"),
-                    Jid::new("bob", "mail.com").with_resource("phone"),
-                ]),
-            }
-        );
+        assert_eq!(friends, Friends {
+            xmlns: "mini.jabber.com/friends".to_string(),
+            friend_list: Some(vec![
+                Jid::new("alice", "mail.com").with_resource("phone"),
+                Jid::new("bob", "mail.com").with_resource("phone"),
+            ]),
+        });
     }
 
     #[test]
