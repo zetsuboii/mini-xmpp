@@ -1,16 +1,17 @@
-use std::io::Cursor;
 use color_eyre::eyre;
+use std::io::Cursor;
 
 use quick_xml::{
-    events::{BytesStart, Event}, Reader, Writer
+    events::{BytesStart, Event},
+    Reader, Writer,
 };
 
-use crate::{from_xml::{FromXml, ToXml}, utils::Collect};
+use crate::from_xml::{ReadXml, WriteXml};
 
 /// Initial header to start XMPP connection
-/// 
+///
 /// https://www.rfc-editor.org/rfc/rfc6120.html#section-4.2
-#[derive(Debug, Default)]
+#[derive(Default, Debug)]
 pub struct InitialHeader {
     pub id: Option<String>,
     pub from: Option<String>,
@@ -21,25 +22,64 @@ pub struct InitialHeader {
     pub xmlns_stream: Option<String>,
 }
 
-impl ToXml for InitialHeader {
-    /// Custom XML serializer for StreamHeader
-    /// 
-    /// This is requrired as quick_xml with serde doesn't allow namespaces and
-    /// parsing starting/ending headers by themselves
-    fn to_xml(&self) -> String {
-        let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
+impl InitialHeader {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
 
-        let mut stream_header = BytesStart::new("stream:stream");
-        if let Some(id) = &self.id {
-            stream_header.push_attribute(("id", id.as_str()));
+impl ReadXml<'_> for InitialHeader {
+    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        // <stream:stream>
+        let stream_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            _ => eyre::bail!("invalid start tag"),
+        };
+
+        Self::read_xml_from_start(stream_start, reader)
+    }
+
+    fn read_xml_from_start<'a>(
+        start: BytesStart<'a>,
+        _reader: &mut Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        if start.name().as_ref() != b"stream:stream" {
+            eyre::bail!("invalid tag name")
         }
+
+        let mut result = Self::new();
+        start.attributes().for_each(|attr| {
+            if let Ok(attr) = attr {
+                let key = attr.key.0;
+                let value = std::str::from_utf8(&attr.value).unwrap().to_string();
+
+                match key {
+                    b"id" => result.id = Some(value),
+                    b"from" => result.from = Some(value),
+                    b"to" => result.to = Some(value),
+                    b"version" => result.version = Some(value),
+                    b"xml:lang" => result.xml_lang = Some(value),
+                    b"xmlns" => result.xmlns = Some(value),
+                    b"xmlns:stream" => result.xmlns_stream = Some(value),
+                    _ => {}
+                }
+            }
+        });
+
+        Ok(result)
+    }
+}
+
+impl WriteXml for InitialHeader {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        let mut stream_header = BytesStart::new("stream:stream");
         if let Some(id) = &self.id {
             stream_header.push_attribute(("id", id.as_str()));
         }
         if let Some(from) = &self.from {
             stream_header.push_attribute(("from", from.as_str()));
         }
-        if let Some(to) = &self.id {
+        if let Some(to) = &self.to {
             stream_header.push_attribute(("to", to.as_str()));
         }
         if let Some(version) = &self.version {
@@ -55,77 +95,47 @@ impl ToXml for InitialHeader {
             stream_header.push_attribute(("xmlns:stream", xmlns_stream.as_str()));
         }
 
-        writer.write_event(Event::Start(stream_header)).unwrap();
-        writer.collect()
-    }
-}
-
-impl<T: AsRef<str>> FromXml<T> for InitialHeader {
-    type Out = Self;
-
-    /// Custom XML deserializer for StreamHeader
-    /// 
-    /// This is requrired as quick_xml with serde doesn't allow namespaces and
-    /// parsing starting/ending headers by themselves
-    fn from_xml(xml: T) -> eyre::Result<Self> {
-        let mut reader = Reader::from_str(xml.as_ref());
-        let mut result = Self::new();
-
-        loop {
-            if let Ok(event) = reader.read_event() {
-                match event {
-                    Event::Eof => break,
-                    Event::Start(e) => {
-                        let name = e.name();
-                        if name.as_ref() != b"stream:stream" {
-                            eyre::bail!(
-                                "expected stream:stream got {:?}",
-                                std::str::from_utf8(name.as_ref())
-                            );
-                        }
-
-                        e.attributes().for_each(|attr| {
-                            if let Ok(attr) = attr {
-                                let key = attr.key.0;
-                                println!("{:?}", std::str::from_utf8(key.as_ref()));
-                                let value = std::str::from_utf8(&attr.value).unwrap().to_string();
-
-                                match key {
-                                    b"id" => result.id = Some(value),
-                                    b"from" => result.from = Some(value),
-                                    b"to" => result.to = Some(value),
-                                    b"version" => result.version = Some(value),
-                                    b"xml:lang" => result.xml_lang = Some(value),
-                                    b"xmlns" => result.xmlns = Some(value),
-                                    b"xmlns:stream" =>result.xmlns_stream = Some(value),
-                                    _ => {}
-                                }
-                            }
-                        })
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        return Ok(result);
-    }
-}
-
-impl InitialHeader {
-    pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        writer.write_event(Event::Start(stream_header))?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::from_xml::{ReadXmlString, WriteXmlString};
+
     use super::*;
 
     #[test]
-    fn deserialize() {
+    fn test_serialize() {
+        let stream_header = InitialHeader {
+            id: Some("++TR84Sm6A3hnt3Q065SnAbbk3Y=".to_string()),
+            from: Some("im.example.com".to_string()),
+            to: Some("juliet@im.example.com".to_string()),
+            version: Some("1.0".to_string()),
+            xml_lang: Some("en".to_string()),
+            xmlns: Some("jabber:client".to_string()),
+            xmlns_stream: Some("http://etherx.jabber.org/streams".to_string()),
+        };
+
+        let expected = [
+            "<stream:stream ",
+            "id=\"++TR84Sm6A3hnt3Q065SnAbbk3Y=\" ",
+            "from=\"im.example.com\" ",
+            "to=\"juliet@im.example.com\" ",
+            "version=\"1.0\" ",
+            "xml:lang=\"en\" ",
+            "xmlns=\"jabber:client\" ",
+            "xmlns:stream=\"http://etherx.jabber.org/streams\">",
+        ]
+        .concat();
+
+        let serialized = stream_header.write_xml_string().unwrap();
+        assert_eq!(serialized, expected);
+    }
+
+    #[test]
+    fn test_deserialize() {
         let raw = r#"
         <stream:stream
             from='im.example.com'
@@ -137,9 +147,7 @@ mod tests {
             xmlns:stream='http://etherx.jabber.org/streams'>
         "#;
 
-        // let stream_header: StreamHeader = (raw.as_ref()).unwrap();
-        // let stream_header = stream_header.unescaped();
-        let stream_header = InitialHeader::from_xml(raw).unwrap();
+        let stream_header = InitialHeader::read_xml_string(raw).unwrap();
 
         assert_eq!(
             stream_header.id,

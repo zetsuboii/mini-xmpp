@@ -1,8 +1,12 @@
-use color_eyre::eyre;
-use quick_xml::{de::from_str, se::to_string};
-use serde::{Deserialize, Serialize};
+use std::io::Cursor;
 
-use crate::from_xml::{FromXml, ToXml};
+use color_eyre::eyre;
+use quick_xml::{
+    events::{BytesEnd, BytesStart, BytesText, Event},
+    Writer,
+};
+
+use crate::from_xml::{ReadXml, WriteXml};
 
 /// XMPP address of the form <localpart@domainpart/resourcepart>
 #[derive(Debug, Clone, Default)]
@@ -85,82 +89,96 @@ impl TryFrom<String> for Jid {
     }
 }
 
-/// JID representation in XML
-#[derive(Serialize, Deserialize)]
-#[serde(rename = "jid")]
-struct JidXml {
-    #[serde(rename = "$text")]
-    pub inner: String,
-}
-
-impl Serialize for Jid {
-    /// Custom serializer for Jid struct
-    ///
-    /// This is required as we'll combine local, domain and resource parts
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let jid_concat = match &self.resource_part {
+impl ToString for Jid {
+    fn to_string(&self) -> String {
+        match &self.resource_part {
             Some(resource_part) => {
                 format!("{}@{}/{}", self.local_part, self.domain_part, resource_part)
             }
             None => format!("{}@{}", self.local_part, self.domain_part),
+        }
+    }
+}
+
+impl ReadXml<'_> for Jid {
+    fn read_xml(reader: &mut quick_xml::Reader<&[u8]>) -> eyre::Result<Self> {
+        // <jid>
+        let stream_start = match reader.read_event()? {
+            Event::Start(tag) => tag,
+            _ => eyre::bail!("invalid start tag"),
         };
-        JidXml { inner: jid_concat }.serialize(serializer)
+
+        Self::read_xml_from_start(stream_start, reader)
+    }
+
+    fn read_xml_from_start<'a>(
+        start: quick_xml::events::BytesStart<'a>,
+        reader: &mut quick_xml::Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        if start.name().as_ref() != b"jid" {
+            eyre::bail!("invalid tag name")
+        }
+
+        // { jid }
+        let text = match reader.read_event()? {
+            Event::Text(text) => String::from_utf8(text.to_vec())?,
+            _ => eyre::bail!("invalid text"),
+        };
+
+        // </jid>
+        match reader.read_event()? {
+            Event::End(tag) => {
+                if tag.name().as_ref() != b"jid" {
+                    eyre::bail!("invalid end tag")
+                }
+            }
+            _ => eyre::bail!("invalid end tag"),
+        }
+
+        Self::try_from(text)
     }
 }
 
-impl<'de> Deserialize<'de> for Jid {
-    /// Custom deserializer for Jid struct
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // TODO: There's no trivial way to map eyre::ErrReport to D::Error
-        JidXml::deserialize(deserializer).map(|jid| Jid::try_from(jid.inner).unwrap())
+// impl ReadXmlString<'_> for Jid {}
+
+impl WriteXml for Jid {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        // <jid>
+        writer.write_event(Event::Start(BytesStart::new("jid")))?;
+        // { jid }
+        writer.write_event(Event::Text(BytesText::new(&self.to_string())))?;
+        // </jid>
+        writer.write_event(Event::End(BytesEnd::new("jid")))?;
+        Ok(())
     }
 }
 
-impl ToXml for Jid {
-    fn to_xml(&self) -> String {
-        to_string(self).expect("failed to convert to string")
-    }
-}
-
-impl<T: AsRef<str>> FromXml<T> for Jid {
-    type Out = Self;
-
-    fn from_xml(value: T) -> eyre::Result<Self> {
-        from_str(value.as_ref())
-            .map(|v| v)
-            .map_err(|_| eyre::eyre!("failed to decode"))
-    }
-}
+// impl WriteXmlString for Jid {}
 
 #[cfg(test)]
 mod tests {
+    use crate::from_xml::{ReadXmlString, WriteXmlString};
+
     use super::*;
-    use quick_xml::{de::from_str, se::to_string};
 
     #[test]
     fn serialize_without_resource() {
         let jid = Jid::new("user", "mail.com");
-        let serialized = to_string(&jid).unwrap();
+        let serialized = jid.write_xml_string().unwrap();
         assert_eq!(serialized, "<jid>user@mail.com</jid>");
     }
 
     #[test]
     fn serialize_with_resource() {
         let jid = Jid::new("user", "mail.com").with_resource("my-resource");
-        let serialized = to_string(&jid).unwrap();
+        let serialized = jid.write_xml_string().unwrap();
         assert_eq!(serialized, "<jid>user@mail.com/my-resource</jid>");
     }
 
     #[test]
     fn deserialize_without_resource() {
         let raw = "<jid>user@mail.com</jid>";
-        let jid: Jid = from_str(raw).unwrap();
+        let jid = Jid::read_xml_string(raw).unwrap();
         assert_eq!(jid.local_part(), "user");
         assert_eq!(jid.domain_part(), "mail.com");
         assert_eq!(jid.resource_part(), None);
@@ -169,7 +187,7 @@ mod tests {
     #[test]
     fn deserialize_with_resource() {
         let raw = "<jid>user@mail.com/my-resource</jid>";
-        let jid: Jid = from_str(raw).unwrap();
+        let jid = Jid::read_xml_string(raw).unwrap();
         assert_eq!(jid.local_part(), "user");
         assert_eq!(jid.domain_part(), "mail.com");
         assert_eq!(jid.resource_part(), Some(&"my-resource".to_string()));
