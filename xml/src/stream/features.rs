@@ -1,3 +1,5 @@
+//! Stream features and related structs
+
 use color_eyre::eyre;
 use std::io::Cursor;
 
@@ -30,6 +32,17 @@ impl ToString for Mechanism {
             Mechanism::Plain => "PLAIN",
         }
         .to_string()
+    }
+}
+
+impl TryFrom<&str> for Mechanism {
+    type Error = eyre::Report;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "PLAIN" => Ok(Self::Plain),
+            _ => eyre::bail!("invalid mechanism"),
+        }
     }
 }
 
@@ -262,8 +275,15 @@ impl WriteXml for StartTls {
 
 /// Request to start TLS connection
 #[derive(Debug, Clone)]
-pub enum StartTlsResponse {
-    /// TLS connection succeeded 
+pub struct StartTlsResponse {
+    xmlns: String,
+    /// Result of the TLS connection
+    result: StartTlsResult,
+}
+
+#[derive(Debug, Clone)]
+pub enum StartTlsResult {
+    /// TLS connection succeeded
     Proceed,
     /// TLS connection failed
     Failure,
@@ -279,28 +299,34 @@ impl ReadXml<'_> for StartTlsResponse {
         Self::read_xml_from_start(start, reader)
     }
 
-    fn read_xml_from_start<'a>(start: BytesStart<'a>, _reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        match start.name().as_ref() {
-            b"proceed" => Ok(Self::Proceed),
-            b"failure" => Ok(Self::Failure),
+    fn read_xml_from_start<'a>(
+        start: BytesStart<'a>,
+        _reader: &mut Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        let xmlns = try_get_attribute(&start, "xmlns")?;
+        let result = match start.name().as_ref() {
+            b"proceed" => StartTlsResult::Proceed,
+            b"failure" => StartTlsResult::Failure,
             _ => eyre::bail!("invalid tag name"),
-        }
+        };
+        Ok(Self { xmlns, result })
     }
 }
 
 impl WriteXml for StartTlsResponse {
     fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
-        match self {
-            StartTlsResponse::Proceed => {
-                // <proceed/>
-                writer.write_event(Event::Empty(BytesStart::new("proceed")))?;
+        let mut result_start = match self.result {
+            StartTlsResult::Proceed => {
+                // // <proceed/>
+                BytesStart::new("proceed")
             }
-            StartTlsResponse::Failure => {
+            StartTlsResult::Failure => {
                 // <failure/>
-                writer.write_event(Event::Empty(BytesStart::new("failure")))?;
+                BytesStart::new("failure")
             }
-        }
-
+        };
+        result_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+        writer.write_event(Event::Empty(result_start))?;
         Ok(())
     }
 }
