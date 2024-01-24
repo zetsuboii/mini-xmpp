@@ -1,4 +1,5 @@
 //! Authentication structures and methods for XML streams.
+#![allow(unused)]
 
 use std::io::Cursor;
 
@@ -71,6 +72,7 @@ impl ReadXml<'_> for AuthRequest {
                     }
                     break;
                 }
+                Event::Eof => eyre::bail!("unexpected EOF"),
                 _ => {}
             }
         }

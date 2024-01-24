@@ -240,6 +240,7 @@ impl ReadXml<'_> for StartTls {
                     b"starttls" => break,
                     _ => eyre::bail!("invalid end tag"),
                 },
+                Event::Eof => eyre::bail!("unexpected EOF"),
                 _ => {}
             }
         }
@@ -411,6 +412,7 @@ impl ReadXml<'_> for Bind {
                     b"bind" => break,
                     _ => eyre::bail!("invalid end tag"),
                 },
+                Event::Eof => eyre::bail!("unexpected EOF"),
                 _ => {}
             }
         }
@@ -534,6 +536,7 @@ impl ReadXml<'_> for Features {
                         String::from_utf8_lossy(tag.name().as_ref())
                     ),
                 },
+                Event::Eof => eyre::bail!("unexpected EOF"),
                 _ => {}
             }
         }
@@ -563,7 +566,7 @@ impl WriteXml for Features {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::Collect;
+    use crate::{from_xml::{ReadXmlString, WriteXmlString}, utils::Collect};
 
     use super::*;
 
@@ -716,15 +719,10 @@ mod tests {
     fn test_features_empty() {
         let features = Features::new();
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        features.write_xml(&mut writer).unwrap();
-        let written = writer.collect();
-        assert_eq!(written, "<stream:features></stream:features>");
+        let serialized = features.write_xml_string().unwrap();
+        assert_eq!(serialized, "<stream:features></stream:features>");
 
-        let mut reader = Reader::from_str(written.as_str());
-        reader.trim_text(true);
-
-        let read = Features::read_xml(&mut reader).unwrap();
+        let read = Features::read_xml_string(&serialized).unwrap();
         assert!(features.is_empty());
         assert!(read.is_empty());
     }
