@@ -194,27 +194,6 @@ impl IsEmpty for StartTls {
     }
 }
 
-impl WriteXml for StartTls {
-    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
-        let mut starttls_start = BytesStart::new("starttls");
-        starttls_start.push_attribute(("xmlns", self.xmlns.as_ref()));
-
-        if self.required {
-            // <starttls xmlns>
-            writer.write_event(Event::Start(starttls_start))?;
-            // <required/>
-            writer.write_event(Event::Empty(BytesStart::new("required")))?;
-            // </starttls>
-            writer.write_event(Event::End(BytesEnd::new("starttls")))?;
-        } else {
-            // <starttls xmlns/>
-            writer.write_event(Event::Empty(starttls_start)).unwrap();
-        }
-
-        Ok(())
-    }
-}
-
 impl ReadXml<'_> for StartTls {
     fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
         let start_tls_start = reader.read_event()?;
@@ -256,6 +235,76 @@ impl ReadXml<'_> for StartTls {
     }
 }
 
+impl WriteXml for StartTls {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        let mut starttls_start = BytesStart::new("starttls");
+        starttls_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+
+        if self.required {
+            // <starttls xmlns>
+            writer.write_event(Event::Start(starttls_start))?;
+            // <required/>
+            writer.write_event(Event::Empty(BytesStart::new("required")))?;
+            // </starttls>
+            writer.write_event(Event::End(BytesEnd::new("starttls")))?;
+        } else {
+            // <starttls xmlns/>
+            writer.write_event(Event::Empty(starttls_start)).unwrap();
+        }
+
+        Ok(())
+    }
+}
+
+//
+// starttls responses
+//
+
+/// Request to start TLS connection
+#[derive(Debug, Clone)]
+pub enum StartTlsResponse {
+    /// TLS connection succeeded 
+    Proceed,
+    /// TLS connection failed
+    Failure,
+}
+
+impl ReadXml<'_> for StartTlsResponse {
+    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match reader.read_event()? {
+            Event::Empty(tag) => tag,
+            Event::Start(tag) => tag,
+            _ => eyre::bail!("invalid start tag"),
+        };
+        Self::read_xml_from_start(start, reader)
+    }
+
+    fn read_xml_from_start<'a>(start: BytesStart<'a>, _reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        match start.name().as_ref() {
+            b"proceed" => Ok(Self::Proceed),
+            b"failure" => Ok(Self::Failure),
+            _ => eyre::bail!("invalid tag name"),
+        }
+    }
+}
+
+impl WriteXml for StartTlsResponse {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        match self {
+            StartTlsResponse::Proceed => {
+                // <proceed/>
+                writer.write_event(Event::Empty(BytesStart::new("proceed")))?;
+            }
+            StartTlsResponse::Failure => {
+                // <failure/>
+                writer.write_event(Event::Empty(BytesStart::new("failure")))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 //
 // bind
 //
@@ -281,31 +330,6 @@ impl Bind {
 impl IsEmpty for Bind {
     fn is_empty(&self) -> bool {
         self.resource.is_none()
-    }
-}
-
-impl WriteXml for Bind {
-    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
-        let mut bind_start = BytesStart::new("bind");
-        bind_start.push_attribute(("xmlns", self.xmlns.as_ref()));
-
-        if let Some(text) = &self.resource {
-            // <bind>
-            writer.write_event(Event::Start(bind_start))?;
-            // <resource>
-            writer.write_event(Event::Start(BytesStart::new("resource")))?;
-            // { resource }
-            writer.write_event(Event::Text(BytesText::new(text)))?;
-            // </resource>
-            writer.write_event(Event::End(BytesEnd::new("resource")))?;
-            // </bind>
-            writer.write_event(Event::End(BytesEnd::new("bind")))?;
-        } else {
-            // <bind/>
-            writer.write_event(Event::Empty(bind_start))?;
-        }
-
-        Ok(())
     }
 }
 
@@ -366,6 +390,31 @@ impl ReadXml<'_> for Bind {
         }
 
         Ok(result)
+    }
+}
+
+impl WriteXml for Bind {
+    fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
+        let mut bind_start = BytesStart::new("bind");
+        bind_start.push_attribute(("xmlns", self.xmlns.as_ref()));
+
+        if let Some(text) = &self.resource {
+            // <bind>
+            writer.write_event(Event::Start(bind_start))?;
+            // <resource>
+            writer.write_event(Event::Start(BytesStart::new("resource")))?;
+            // { resource }
+            writer.write_event(Event::Text(BytesText::new(text)))?;
+            // </resource>
+            writer.write_event(Event::End(BytesEnd::new("resource")))?;
+            // </bind>
+            writer.write_event(Event::End(BytesEnd::new("bind")))?;
+        } else {
+            // <bind/>
+            writer.write_event(Event::Empty(bind_start))?;
+        }
+
+        Ok(())
     }
 }
 
