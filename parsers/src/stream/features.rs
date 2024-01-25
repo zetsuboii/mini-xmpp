@@ -263,9 +263,9 @@ impl WriteXml for StartTls {
 /// Request to start TLS connection
 #[derive(Debug, Clone)]
 pub struct StartTlsResponse {
-    xmlns: String,
+    pub xmlns: String,
     /// Result of the TLS connection
-    result: StartTlsResult,
+    pub result: StartTlsResult,
 }
 
 #[derive(Debug, Clone)]

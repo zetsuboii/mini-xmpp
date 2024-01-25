@@ -8,9 +8,9 @@ use self::iq::Iq;
 use self::message::Message;
 use self::presence::Presence;
 
-mod iq;
-mod message;
-mod presence;
+pub  mod iq;
+pub mod message;
+pub mod presence;
 
 /// Basic unit of communication in XMPP.
 /// They are the equivalent of HTTP requests and responses.
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(
             stanza,
             Stanza::Iq(Iq {
-                id: Some("123".to_string()),
+                id: "123".into(),
                 from: Some("alice@mail.com".to_string()),
                 type_: Some("get".to_string()),
                 payload: Some(IqPayload::Friends(Friends {

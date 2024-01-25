@@ -18,15 +18,18 @@ use crate::{
 /// commands and receiving responses.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Iq {
-    pub id: Option<String>,
+    pub id: String,
     pub from: Option<String>,
     pub type_: Option<String>,
     pub payload: Option<IqPayload>,
 }
 
 impl Iq {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(id: String) -> Self {
+        Self {
+            id,
+            ..Default::default()
+        }
     }
 }
 
@@ -41,8 +44,9 @@ impl ReadXml<'_> for Iq {
             eyre::bail!("invalid start tag")
         }
 
-        let mut result = Self::new();
-        result.id = try_get_attribute(&start, "id").ok();
+        let id = try_get_attribute(&start, "id")?;
+        let mut result = Self::new(id);
+
         result.from = try_get_attribute(&start, "from").ok();
         result.type_ = try_get_attribute(&start, "type").ok();
 
@@ -85,9 +89,8 @@ impl ReadXml<'_> for Iq {
 impl WriteXml for Iq {
     fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
         let mut iq_start = BytesStart::new("iq");
-        if let Some(id) = &self.id {
-            iq_start.push_attribute(("id", id.as_str()));
-        }
+        iq_start.push_attribute(("id", self.id.as_str()));
+
         if let Some(from) = &self.from {
             iq_start.push_attribute(("from", from.as_str()));
         }
@@ -375,7 +378,7 @@ mod tests {
         assert_eq!(
             iq,
             Iq {
-                id: Some("123".to_string()),
+                id: "123".to_string(),
                 from: Some("alice@mail".to_string()),
                 type_: Some("set".to_string()),
                 payload: Some(IqPayload::Bind(Bind {
