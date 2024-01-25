@@ -6,19 +6,13 @@
 use std::io::Cursor;
 
 use color_eyre::eyre;
-use quick_xml::{events::BytesStart, Reader, Writer};
+use quick_xml::{events::Event, Reader, Writer};
 
 use crate::utils::Collect;
 
 pub trait ReadXml<'r, R = &'r [u8], Out = Self> {
-    /// Reads XML and returns the `Out` element
-    fn read_xml(reader: &mut Reader<R>) -> eyre::Result<Out>;
-
-    /// Reads XML given a start tag
-    ///
-    /// This makes sense when we're selecting which element to read and get the
-    /// starting tag
-    fn read_xml_from_start<'a>(start: BytesStart<'a>, reader: &mut Reader<R>) -> eyre::Result<Out>;
+    /// Reads XML starting from the root event
+    fn read_xml(root: Event, reader: &mut Reader<R>) -> eyre::Result<Out>;
 }
 
 /// Trait to read XML from a string
@@ -26,11 +20,12 @@ pub trait ReadXmlString<'r>: ReadXml<'r>
 where
     Self: Sized,
 {
-    /// Reads XML from a string and returns `Result<Self>` 
+    /// Reads XML from a string and returns `Result<Self>`
     fn read_xml_string(xml: &'r str) -> eyre::Result<Self> {
         let mut reader = Reader::from_str(xml);
         reader.trim_text(true);
-        Self::read_xml(&mut reader)
+        let root = reader.read_event()?;
+        Self::read_xml(root, &mut reader)
     }
 }
 
@@ -52,4 +47,4 @@ pub trait WriteXmlString: WriteXml {
 }
 
 /// Blanket implementation for `WriteXmlString` for all `WriteXml` types
-impl <T: WriteXml> WriteXmlString for T {}
+impl<T: WriteXml> WriteXmlString for T {}

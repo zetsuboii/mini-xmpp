@@ -3,6 +3,7 @@ use std::io::Cursor;
 use color_eyre::eyre;
 use quick_xml::{
     events::{BytesStart, Event},
+    name::QName,
     Reader, Writer,
 };
 
@@ -26,20 +27,12 @@ impl Presence {
 }
 
 impl ReadXml<'_> for Presence {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <presence>
-        let presence_start = match reader.read_event()? {
-            Event::Empty(e) => e,
-            _ => eyre::bail!("invalid start event"),
+    fn read_xml<'a>(event: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let (start, empty) = match event {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
+            _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(presence_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: quick_xml::events::BytesStart<'a>,
-        _reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"presence" {
             eyre::bail!("invalid start tag");
         }
@@ -48,6 +41,11 @@ impl ReadXml<'_> for Presence {
         presence.id = try_get_attribute(&start, "id").ok();
         presence.from = try_get_attribute(&start, "from").ok();
         presence.to = try_get_attribute(&start, "to").ok();
+
+        // If not empty tag, read until end tag
+        if !empty {
+            reader.read_to_end(QName(b"presence"))?;
+        }
 
         Ok(presence)
     }

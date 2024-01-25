@@ -2,8 +2,7 @@ use std::io::Cursor;
 
 use color_eyre::eyre;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, BytesText, Event},
-    Writer,
+    events::{BytesEnd, BytesStart, BytesText, Event}, Reader, Writer
 };
 
 use crate::from_xml::{ReadXml, WriteXml};
@@ -101,20 +100,14 @@ impl ToString for Jid {
 }
 
 impl ReadXml<'_> for Jid {
-    fn read_xml(reader: &mut quick_xml::Reader<&[u8]>) -> eyre::Result<Self> {
-        // <jid>
-        let stream_start = match reader.read_event()? {
+    fn read_xml<'a>(
+        start: Event<'a>,
+        reader: &mut Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        let start = match start {
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(stream_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: quick_xml::events::BytesStart<'a>,
-        reader: &mut quick_xml::Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"jid" {
             eyre::bail!("invalid tag name")
         }
@@ -139,8 +132,6 @@ impl ReadXml<'_> for Jid {
     }
 }
 
-// impl ReadXmlString<'_> for Jid {}
-
 impl WriteXml for Jid {
     fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
         // <jid>
@@ -152,8 +143,6 @@ impl WriteXml for Jid {
         Ok(())
     }
 }
-
-// impl WriteXmlString for Jid {}
 
 #[cfg(test)]
 mod tests {

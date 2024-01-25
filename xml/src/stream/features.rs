@@ -20,7 +20,7 @@ use crate::{
 
 /// Mechanisms used in the communication, includes hashes and authentication
 /// methods.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mechanism {
     /// Plaintext authentication mechanism
     Plain,
@@ -47,20 +47,12 @@ impl TryFrom<&str> for Mechanism {
 }
 
 impl ReadXml<'_> for Mechanism {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+    fn read_xml<'a>(event: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
         // <mechanism>
-        let mechanism_start = match reader.read_event()? {
+        let start = match event {
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(mechanism_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"mechanism" {
             eyre::bail!("invalid tag name")
         }
@@ -101,7 +93,7 @@ impl WriteXml for Mechanism {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Mechanisms {
     pub xmlns: String,
     pub mechanisms: Vec<Mechanism>,
@@ -117,31 +109,30 @@ impl Mechanisms {
 }
 
 impl ReadXml<'_> for Mechanisms {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <mechanisms>
-        let mechanisms_start = reader.read_event()?;
-        let mechanisms_start = match mechanisms_start {
+    // fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+    //     // <mechanisms>
+    //     let mechanisms_start = reader.read_event()?;
+    //     let mechanisms_start = match mechanisms_start {
+    //         Event::Start(tag) => tag,
+    //         _ => eyre::bail!("invalid start tag"),
+    //     };
+
+    //     Self::read_xml_from_start(mechanisms_start, reader)
+    // }
+
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match root {
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(mechanisms_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let mut result = Self::new(xmlns);
 
         while let Ok(event) = reader.read_event() {
             match event {
-                Event::Start(tag) => match tag.name().as_ref() {
+                Event::Start(ref tag) => match tag.name().as_ref() {
                     // <mechanism>
-                    b"mechanism" => result
-                        .mechanisms
-                        .push(Mechanism::read_xml_from_start(tag, reader)?),
+                    b"mechanism" => result.mechanisms.push(Mechanism::read_xml(event, reader)?),
                     _ => eyre::bail!("invalid start tag"),
                 },
                 Event::End(tag) => match tag.name().as_ref() {
@@ -185,7 +176,7 @@ impl WriteXml for Mechanisms {
 //
 
 /// Request to start TLS connection
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct StartTls {
     pub xmlns: String,
     /// If TLS connection is required
@@ -208,27 +199,22 @@ impl IsEmpty for StartTls {
 }
 
 impl ReadXml<'_> for StartTls {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let start_tls_start = reader.read_event()?;
-        let starttls_start = match start_tls_start {
-            Event::Empty(tag) => tag,
-            Event::Start(tag) => tag,
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let (start, empty) = match root {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(starttls_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"starttls" {
             eyre::bail!("invalid tag name")
         }
 
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let mut result = Self::new(xmlns);
+
+        if empty {
+            return Ok(result);
+        }
 
         while let Ok(event) = reader.read_event() {
             match event {
@@ -291,19 +277,12 @@ pub enum StartTlsResult {
 }
 
 impl ReadXml<'_> for StartTlsResponse {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let start = match reader.read_event()? {
+    fn read_xml<'a>(root: Event<'a>, _reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match root {
             Event::Empty(tag) => tag,
-            Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-        Self::read_xml_from_start(start, reader)
-    }
 
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        _reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let result = match start.name().as_ref() {
             b"proceed" => StartTlsResult::Proceed,
@@ -339,7 +318,7 @@ impl WriteXml for StartTlsResponse {
 /// Request to bind resource
 /// Resource binding can be done by client, or it can be automatically assigned
 /// by the server
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Bind {
     pub xmlns: String,
     pub resource: Option<String>,
@@ -361,28 +340,22 @@ impl IsEmpty for Bind {
 }
 
 impl ReadXml<'_> for Bind {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <bind>
-        let bind_start = reader.read_event()?;
-        let bind_start = match bind_start {
-            Event::Empty(tag) => tag,
-            Event::Start(tag) => tag,
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let (start, empty) = match root {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(bind_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"bind" {
             eyre::bail!("invalid tag name")
         }
 
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let mut result = Self::new(xmlns);
+
+        if empty {
+            return Ok(result);
+        }
 
         while let Ok(event) = reader.read_event() {
             match event {
@@ -451,7 +424,7 @@ impl WriteXml for Bind {
 //
 
 /// Stream features to negotiate after connection
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Features {
     pub start_tls: Option<StartTls>,
     pub mechanisms: Option<Mechanisms>,
@@ -471,20 +444,12 @@ impl IsEmpty for Features {
 }
 
 impl ReadXml<'_> for Features {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let features_start = match reader.read_event()? {
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match root {
             Event::Empty(tag) => tag,
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(features_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"stream:features" {
             eyre::bail!("invalid tag name")
         }
@@ -493,39 +458,39 @@ impl ReadXml<'_> for Features {
 
         while let Ok(event) = reader.read_event() {
             match event {
-                Event::Empty(tag) => match tag.name().as_ref() {
+                Event::Empty(ref tag) => match tag.name().as_ref() {
                     b"starttls" => {
                         if result.start_tls.is_some() {
                             eyre::bail!("multiple starttls tags")
                         }
-                        result.start_tls = Some(StartTls::read_xml_from_start(tag, reader)?)
+                        result.start_tls = Some(StartTls::read_xml(event, reader)?)
                     }
                     b"bind" => {
                         if result.bind.is_some() {
                             eyre::bail!("multiple bind tags")
                         }
-                        result.bind = Some(Bind::read_xml_from_start(tag, reader)?)
+                        result.bind = Some(Bind::read_xml(event, reader)?)
                     }
                     _ => eyre::bail!("invalid empty tag"),
                 },
-                Event::Start(tag) => match tag.name().as_ref() {
+                Event::Start(ref tag) => match tag.name().as_ref() {
                     b"starttls" => {
                         if result.start_tls.is_some() {
                             eyre::bail!("multiple starttls tags")
                         }
-                        result.start_tls = Some(StartTls::read_xml_from_start(tag, reader)?)
+                        result.start_tls = Some(StartTls::read_xml(event, reader)?)
                     }
                     b"bind" => {
                         if result.bind.is_some() {
                             eyre::bail!("multiple bind tags")
                         }
-                        result.bind = Some(Bind::read_xml_from_start(tag, reader)?)
+                        result.bind = Some(Bind::read_xml(event, reader)?)
                     }
                     b"mechanisms" => {
                         if result.mechanisms.is_some() {
                             eyre::bail!("multiple mechanisms tags")
                         }
-                        result.mechanisms = Some(Mechanisms::read_xml_from_start(tag, reader)?)
+                        result.mechanisms = Some(Mechanisms::read_xml(event, reader)?)
                     }
                     _ => eyre::bail!("invalid start tag"),
                 },
@@ -566,23 +531,9 @@ impl WriteXml for Features {
 
 #[cfg(test)]
 mod tests {
-    use crate::{from_xml::{ReadXmlString, WriteXmlString}, utils::Collect};
+    use crate::from_xml::{ReadXmlString, WriteXmlString};
 
     use super::*;
-
-    fn mechanism_equals(a: &Mechanism, b: &Mechanism) -> bool {
-        match (a, b) {
-            (Mechanism::Plain, Mechanism::Plain) => true,
-        }
-    }
-
-    fn starttls_equals(a: &StartTls, b: &StartTls) -> bool {
-        a.xmlns == b.xmlns && a.required == b.required
-    }
-
-    fn bind_equals(a: &Bind, b: &Bind) -> bool {
-        a.xmlns == b.xmlns && a.resource == b.resource
-    }
 
     #[test]
     fn test_mechanism() {
@@ -597,23 +548,20 @@ mod tests {
             mechanisms: vec![Mechanism::Plain],
         };
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        mechanisms.write_xml(&mut writer).unwrap();
-        let written = writer.collect();
+        let serialized = mechanisms.write_xml_string().unwrap();
         assert_eq!(
-            written,
+            serialized,
             "<mechanisms xmlns=\"urn:ietf:params:xml:ns:xmpp-sasl\"><mechanism>PLAIN</mechanism></mechanisms>"
         );
 
-        let mut reader = Reader::from_str(written.as_str());
-        reader.trim_text(true);
-
-        let read = Mechanisms::read_xml(&mut reader).unwrap();
-        assert_eq!(mechanisms.xmlns, read.xmlns);
-        for (mechanism, read_mechanism) in mechanisms.mechanisms.iter().zip(read.mechanisms.iter())
-        {
-            assert!(mechanism_equals(mechanism, read_mechanism));
-        }
+        let deserialized = Mechanisms::read_xml_string(&serialized).unwrap();
+        assert_eq!(
+            deserialized,
+            Mechanisms {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-sasl".to_string(),
+                mechanisms: vec![Mechanism::Plain],
+            }
+        );
     }
 
     #[test]
@@ -623,19 +571,20 @@ mod tests {
             required: true,
         };
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        starttls.write_xml(&mut writer).unwrap();
-        let written = writer.collect();
+        let serialized = starttls.write_xml_string().unwrap();
         assert_eq!(
-            written,
+            serialized,
             "<starttls xmlns=\"urn:ietf:params:xml:ns:xmpp-tls\"><required/></starttls>"
         );
 
-        let mut reader = Reader::from_str(written.as_str());
-        reader.trim_text(true);
-
-        let read = StartTls::read_xml(&mut reader).unwrap();
-        assert!(starttls_equals(&starttls, &read));
+        let deserialized = StartTls::read_xml_string(&serialized).unwrap();
+        assert_eq!(
+            deserialized,
+            StartTls {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
+                required: true,
+            }
+        )
     }
 
     #[test]
@@ -645,19 +594,22 @@ mod tests {
             resource: Some("resource".to_string()),
         };
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        bind.write_xml(&mut writer).unwrap();
-        let written = writer.collect();
+        let serialized = bind.write_xml_string().unwrap();
         assert_eq!(
-            written,
-            "<bind xmlns=\"urn:ietf:params:xml:ns:xmpp-bind\"><resource>resource</resource></bind>"
+            serialized,
+            [
+                "<bind xmlns=\"urn:ietf:params:xml:ns:xmpp-bind\">",
+                "<resource>resource</resource>",
+                "</bind>"
+            ]
+            .concat()
         );
 
-        let mut reader = Reader::from_str(written.as_str());
-        reader.trim_text(true);
-
-        let read = Bind::read_xml(&mut reader).unwrap();
-        assert!(bind_equals(&bind, &read));
+        let deserialized = Bind::read_xml_string(&serialized).unwrap();
+        assert_eq!(deserialized, Bind {
+            xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+            resource: Some("resource".to_string()),
+        })
     }
 
     #[test]
@@ -677,11 +629,9 @@ mod tests {
             }),
         };
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        features.write_xml(&mut writer).unwrap();
-        let written = writer.collect();
+        let serialized = features.write_xml_string().unwrap();
         assert_eq!(
-            written,
+            serialized,
             [
                 "<stream:features>",
                 "<starttls xmlns=\"urn:ietf:params:xml:ns:xmpp-tls\"><required/></starttls>",
@@ -691,28 +641,21 @@ mod tests {
             ].concat()
         );
 
-        let mut reader = Reader::from_str(written.as_str());
-        reader.trim_text(true);
-
-        let read = Features::read_xml(&mut reader).unwrap();
-        assert!(starttls_equals(
-            features.start_tls.as_ref().unwrap(),
-            read.start_tls.as_ref().unwrap()
-        ));
-        for (mechanism, read_mechanism) in features
-            .mechanisms
-            .as_ref()
-            .unwrap()
-            .mechanisms
-            .iter()
-            .zip(read.mechanisms.as_ref().unwrap().mechanisms.iter())
-        {
-            assert!(mechanism_equals(mechanism, read_mechanism));
-        }
-        assert!(bind_equals(
-            features.bind.as_ref().unwrap(),
-            read.bind.as_ref().unwrap()
-        ));
+        let deserialized = Features::read_xml_string(&serialized).unwrap();
+        assert_eq!(deserialized, Features {
+            start_tls: Some(StartTls {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-tls".to_string(),
+                required: true,
+            }),
+            mechanisms: Some(Mechanisms {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-sasl".to_string(),
+                mechanisms: vec![Mechanism::Plain],
+            }),
+            bind: Some(Bind {
+                xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
+                resource: Some("resource".to_string()),
+            }),
+        })
     }
 
     #[test]

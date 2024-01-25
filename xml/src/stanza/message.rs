@@ -4,7 +4,7 @@ use color_eyre::eyre;
 use quick_xml::{
     events::{BytesEnd, BytesStart, BytesText, Event},
     name::QName,
-    Reader, Writer,
+    Writer,
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
     utils::try_get_attribute,
 };
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub id: Option<String>,
     pub from: Option<String>,
@@ -28,20 +28,11 @@ impl Message {
 }
 
 impl ReadXml<'_> for Message {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <message>
-        let message_start = match reader.read_event()? {
-            quick_xml::events::Event::Start(tag) => tag,
+    fn read_xml<'a>(root: Event<'a>, reader: &mut quick_xml::Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match root {
+            Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(message_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut quick_xml::Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"message" {
             eyre::bail!("invalid tag name")
         }
@@ -112,5 +103,48 @@ impl WriteXml for Message {
         writer.write_event(Event::End(BytesEnd::new("message")))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::from_xml::{ReadXmlString, WriteXmlString};
+
+    use super::*;
+
+    #[test]
+    fn test_message_empty() {
+        let message: Message = Message::new();
+
+        let serialized = message.write_xml_string().unwrap();
+        let expected = r#"<message></message>"#;
+        assert_eq!(serialized, expected);
+    }
+
+    #[test]
+    fn test_message_full() {
+        let message = Message {
+            id: Some("123".to_string()),
+            from: Some("alice@mail.com".to_string()),
+            to: Some("bob@mail.com".to_string()),
+            body: Some("Hello, world!".to_string()),
+            xml_lang: Some("en".to_string()),
+        };
+
+        let serialized = message.write_xml_string().unwrap();
+        let expected = [
+            "<message ",
+            "id=\"123\" ",
+            "from=\"alice@mail.com\" ",
+            "to=\"bob@mail.com\" ",
+            "xml:lang=\"en\">",
+            "<body>Hello, world!</body>",
+            "</message>",
+        ]
+        .concat();
+        assert_eq!(serialized, expected);
+
+        let deserialized: Message = Message::read_xml_string(serialized.as_str()).unwrap();
+        assert_eq!(deserialized, message);
     }
 }

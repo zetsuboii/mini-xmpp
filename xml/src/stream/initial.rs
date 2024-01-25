@@ -31,20 +31,14 @@ impl InitialHeader {
 }
 
 impl ReadXml<'_> for InitialHeader {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <stream:stream>
-        let stream_start = match reader.read_event()? {
+    fn read_xml<'a>(
+        event: Event<'a>,
+        _reader: &mut Reader<&[u8]>,
+    ) -> eyre::Result<Self> {
+        let start = match event {
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
         };
-
-        Self::read_xml_from_start(stream_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        _reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"stream:stream" {
             eyre::bail!("invalid tag name")
         }

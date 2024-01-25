@@ -31,20 +31,12 @@ impl Iq {
 }
 
 impl ReadXml<'_> for Iq {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let iq_start = match reader.read_event()? {
-            Event::Start(tag) => tag,
-            Event::Empty(tag) => tag,
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let (start, empty) = match root {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
             _ => eyre::bail!("invalid start event"),
         };
-
-        Self::read_xml_from_start(iq_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"iq" {
             eyre::bail!("invalid start tag")
         }
@@ -54,19 +46,24 @@ impl ReadXml<'_> for Iq {
         result.from = try_get_attribute(&start, "from").ok();
         result.type_ = try_get_attribute(&start, "type").ok();
 
+        if empty {
+            return Ok(result);
+        }
+
         while let Ok(event) = reader.read_event() {
             match event {
-                Event::Start(tag) => match tag.name().as_ref() {
-                    // <bind>
+                Event::Empty(ref tag) | Event::Start(ref tag) => match tag.name().as_ref() {
+                    // <bind> or <bind/>
                     b"bind" => {
-                        result.payload =
-                            Some(IqPayload::Bind(Bind::read_xml_from_start(tag, reader)?))
+                        result.payload = Bind::read_xml(event, reader)
+                            .map(IqPayload::Bind)
+                            .map(Some)?
                     }
-                    // <friends>
+                    // <friends> or <friends/>
                     b"friends" => {
-                        result.payload = Some(IqPayload::Friends(Friends::read_xml_from_start(
-                            tag, reader,
-                        )?))
+                        result.payload = Friends::read_xml(event, reader)
+                            .map(IqPayload::Friends)
+                            .map(Some)?
                     }
                     _ => eyre::bail!("invalid tag name"),
                 },
@@ -124,23 +121,19 @@ pub enum IqPayload {
 }
 
 impl ReadXml<'_> for IqPayload {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let payload_start = match reader.read_event()? {
+    fn read_xml<'a>(
+        root: Event<'a>,
+        reader: &mut quick_xml::Reader<&[u8]>,
+    ) -> color_eyre::eyre::Result<Self> {
+        let start = match &root {
             Event::Start(tag) => tag,
             Event::Empty(tag) => tag,
             _ => eyre::bail!("invalid start event"),
         };
 
-        Self::read_xml_from_start(payload_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut quick_xml::Reader<&[u8]>,
-    ) -> color_eyre::eyre::Result<Self> {
         match start.name().as_ref() {
-            b"bind" => Ok(Self::Bind(Bind::read_xml_from_start(start, reader)?)),
-            b"friends" => Ok(Self::Friends(Friends::read_xml_from_start(start, reader)?)),
+            b"bind" => Ok(Self::Bind(Bind::read_xml(root, reader)?)),
+            b"friends" => Ok(Self::Friends(Friends::read_xml(root, reader)?)),
             _ => eyre::bail!("invalid tag name"),
         }
     }
@@ -184,20 +177,15 @@ impl IsEmpty for Bind {
 }
 
 impl ReadXml<'_> for Bind {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let bind_start = match reader.read_event()? {
-            Event::Start(tag) => tag,
-            Event::Empty(tag) => tag,
-            _ => eyre::bail!("invalid start event"),
-        };
-
-        Self::read_xml_from_start(bind_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
+    fn read_xml<'a>(
+        root: Event<'a>,
         reader: &mut quick_xml::Reader<&[u8]>,
     ) -> color_eyre::eyre::Result<Self> {
+        let (start, empty) = match root {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
+            _ => eyre::bail!("invalid start event"),
+        };
         if start.name().as_ref() != b"bind" {
             eyre::bail!("invalid start tag")
         }
@@ -205,11 +193,15 @@ impl ReadXml<'_> for Bind {
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let mut result = Self::new(xmlns);
 
+        if empty {
+            return Ok(result);
+        }
+
         while let Ok(event) = reader.read_event() {
             match event {
-                Event::Start(tag) => match tag.name().as_ref() {
+                Event::Start(ref tag) => match tag.name().as_ref() {
                     // <jid>
-                    b"jid" => result.jid = Some(Jid::read_xml_from_start(tag, reader)?),
+                    b"jid" => result.jid = Some(Jid::read_xml(event, reader)?),
                     // <resource>
                     b"resource" => {
                         let resource = reader
@@ -288,23 +280,29 @@ impl Friends {
 }
 
 impl ReadXml<'_> for Friends {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        let friends_start = match reader.read_event()? {
-            Event::Start(tag) => tag,
-            Event::Empty(tag) => tag,
-            _ => eyre::bail!("invalid start event"),
-        };
-
-        Self::read_xml_from_start(friends_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
+    fn read_xml<'a>(
+        root: Event<'a>,
         reader: &mut quick_xml::Reader<&[u8]>,
     ) -> color_eyre::eyre::Result<Self> {
-        if start.name().as_ref() != b"friends" {
-            eyre::bail!("invalid start tag")
+        if let Event::Empty(tag) = root {
+            if tag.name().as_ref() != b"friends" {
+                eyre::bail!("invalid start tag")
+            }
+
+            let xmlns = try_get_attribute(&tag, "xmlns")?;
+            return Ok(Self::new(xmlns));
         }
+
+        let start = match root {
+            Event::Start(tag) => {
+                if tag.name().as_ref() == b"friends" {
+                    tag
+                } else {
+                    eyre::bail!("invalid start tag")
+                }
+            }
+            _ => eyre::bail!("invalid start event"),
+        };
 
         let xmlns = try_get_attribute(&start, "xmlns")?;
         let mut result = Self::new(xmlns);
@@ -312,8 +310,8 @@ impl ReadXml<'_> for Friends {
         while let Ok(event) = reader.read_event() {
             // <jid>
             match event {
-                Event::Start(tag) => {
-                    let jid = Jid::read_xml_from_start(tag, reader)?;
+                Event::Start(_) => {
+                    let jid = Jid::read_xml(event, reader)?;
                     match result.friend_list.as_mut() {
                         Some(list) => list.push(jid),
                         None => result.friend_list = Some(vec![jid]),
@@ -321,7 +319,7 @@ impl ReadXml<'_> for Friends {
                 }
                 Event::End(tag) => {
                     if tag.name().as_ref() != b"friends" {
-                        eyre::bail!("invalid end tag")
+                        eyre::bail!("invalid end tag {:?}", tag.name())
                     }
                     break;
                 }

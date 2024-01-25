@@ -10,8 +10,7 @@ use crate::{
 use base64::{prelude::BASE64_STANDARD as BASE64, Engine};
 use color_eyre::eyre;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, BytesText, Event},
-    Reader,
+    events::{BytesEnd, BytesStart, BytesText, Event}, name::QName, Reader
 };
 
 use super::features::Mechanism;
@@ -38,19 +37,11 @@ impl AuthRequest {
 }
 
 impl ReadXml<'_> for AuthRequest {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="PLAIN">
-        let auth_start = match reader.read_event()? {
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let start = match root {
             Event::Start(tag) => tag,
-            _ => eyre::bail!("invalid xml"),
+            _ => eyre::bail!("invalid start tag"),
         };
-        Self::read_xml_from_start(auth_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"auth" {
             eyre::bail!("invalid tag name")
         }
@@ -106,7 +97,7 @@ impl WriteXml for AuthRequest {
 // authentication success
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthSuccess {
     pub xmlns: String,
 }
@@ -118,24 +109,21 @@ impl AuthSuccess {
 }
 
 impl ReadXml<'_> for AuthSuccess {
-    fn read_xml(reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
-        // <success xmlns/>
-        let success_start = match reader.read_event()? {
-            Event::Empty(tag) => tag,
-            _ => eyre::bail!("invalid xml"),
+    fn read_xml<'a>(root: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
+        let (start, empty) = match root {
+            Event::Empty(tag) => (tag, true),
+            Event::Start(tag) => (tag, false),
+            _ => eyre::bail!("invalid start tag"),
         };
-        Self::read_xml_from_start(success_start, reader)
-    }
-
-    fn read_xml_from_start<'a>(
-        start: BytesStart<'a>,
-        _reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
         if start.name().as_ref() != b"success" {
             eyre::bail!("invalid tag name")
         }
 
         let xmlns = try_get_attribute(&start, "xmlns")?;
+
+        if !empty {
+            reader.read_to_end(QName(b"success"))?;
+        }
 
         Ok(AuthSuccess { xmlns })
     }
