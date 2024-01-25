@@ -42,6 +42,7 @@ impl Session {
         let mut initial_header = InitialHeader::new();
         initial_header.id = self.id.clone();
         initial_header.from = Some(self.jid.to_string());
+        initial_header.to = Some("localhost".into());
         initial_header.version = Some("1.0".to_string());
         initial_header.xmlns = Some("jabber:client".to_string());
         initial_header.xmlns_stream = Some("http://etherx.jabber.org/streams".to_string());
@@ -95,9 +96,18 @@ impl Session {
 
                 // Get response
                 let response = self.connection.read().await?;
-                let tls_response = StartTlsResponse::read_xml_string(response.as_str())?;
-                if let StartTlsResult::Failure = tls_response.result {
-                    eyre::bail!("TLS negotiation failed")
+                let tls_response = StartTlsResponse::read_xml_string(response.as_str());
+
+                // TODO: Server doesn't add xmlns attribute to the response
+                match tls_response {
+                    Ok(response) => {
+                        if let StartTlsResult::Failure = response.result {
+                            eyre::bail!("TLS negotiation failed")
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("{}, ignoring", e);
+                    },
                 }
             }
         }
