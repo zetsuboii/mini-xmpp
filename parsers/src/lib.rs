@@ -1,6 +1,7 @@
+pub mod constants;
+pub mod jid;
 pub mod stanza;
 pub mod stream;
-pub mod jid;
 pub mod utils;
 
 // Traits

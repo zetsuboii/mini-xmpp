@@ -3,7 +3,6 @@ use parsers::{jid::Jid, stream::auth::PlaintextCredentials};
 use crate::{conn::Connection, session::Session};
 
 mod conn;
-mod constants;
 mod session;
 
 fn get_user_input(prompt: &'static str) -> String {

@@ -1,5 +1,6 @@
 use color_eyre::eyre;
 use parsers::{
+    constants::{NAMESPACE_BIND, NAMESPACE_SASL, NAMESPACE_TLS},
     empty::IsEmpty,
     from_xml::{ReadXmlString, WriteXmlString},
     jid::Jid,
@@ -12,10 +13,7 @@ use parsers::{
 };
 use uuid::Uuid;
 
-use crate::{
-    conn::Connection,
-    constants::{NAMESPACE_BIND, NAMESPACE_SASL, NAMESPACE_TLS},
-};
+use crate::conn::Connection;
 
 #[derive(Debug)]
 pub struct Session {
@@ -104,10 +102,10 @@ impl Session {
                         if let StartTlsResult::Failure = response.result {
                             eyre::bail!("TLS negotiation failed")
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("{}, ignoring", e);
-                    },
+                    }
                 }
             }
         }
