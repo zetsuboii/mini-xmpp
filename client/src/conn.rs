@@ -7,16 +7,17 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
-pub type ClientStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub type Stream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Struct to represent connection on the client side
 #[derive(Debug)]
 pub struct Connection {
-    stream: ClientStream,
+    stream: Stream,
 }
 
+#[allow(unused)]
 impl Connection {
-    pub fn new(stream: ClientStream) -> Self {
+    pub fn new(stream: Stream) -> Self {
         Self { stream }
     }
 
@@ -27,13 +28,14 @@ impl Connection {
     }
 
     /// Split the stream into sink and stream
-    pub fn split(self) -> (SplitSink<ClientStream, Message>, SplitStream<ClientStream>) {
+    pub fn split(self) -> (SplitSink<Stream, Message>, SplitStream<Stream>) {
         self.stream.split()
     }
 
     /// Receives data from the server
     pub async fn read(&mut self) -> eyre::Result<String> {
-        self.stream.next()
+        self.stream
+            .next()
             .await
             .ok_or(eyre::eyre!("no message received"))?
             .and_then(|message| message.into_text())

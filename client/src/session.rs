@@ -175,4 +175,9 @@ impl Session {
 
         Ok(())
     }
+
+    pub async fn send_stanza(&mut self, stanza: impl WriteXmlString) -> eyre::Result<()> {
+        self.connection.send(stanza.write_xml_string()?).await?;
+        Ok(())
+    }
 }
