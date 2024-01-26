@@ -10,7 +10,9 @@ use crate::{
 use base64::{prelude::BASE64_STANDARD as BASE64, Engine};
 use color_eyre::eyre;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, BytesText, Event}, name::QName, Reader
+    events::{BytesEnd, BytesStart, BytesText, Event},
+    name::QName,
+    Reader,
 };
 
 use super::features::Mechanism;
@@ -158,7 +160,6 @@ impl PlaintextCredentials {
         let value = BASE64.decode(value.as_bytes())?;
         let value = std::str::from_utf8(&value)?;
         let mut values: Vec<String> = value.split("\0").map(|s| s.to_string()).collect();
-        println!("{:?}", values);
         let password = values.pop().ok_or(eyre::eyre!("missing password"))?;
         let username = values.pop().ok_or(eyre::eyre!("missing username"))?;
         Ok(Self::new(username, password))
