@@ -1198,6 +1198,7 @@ dependencies = [
  "dotenvy",
  "futures-channel",
  "futures-util",
+ "parsers",
  "quick-xml",
  "serde",
  "sqlx",
