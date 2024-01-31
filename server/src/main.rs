@@ -1,4 +1,5 @@
 mod conn;
+mod handlers;
 mod session;
 mod state;
 
@@ -13,6 +14,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main]
 async fn main() {
+    println!(":: xmpp server ::");
     dotenv().expect(".env");
 
     let address = "127.0.0.1:9292";
@@ -36,8 +38,14 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let session = Arc::new(Mutex::new(session));
 
     // Write the session to the state
-    let mut state = state.write().await;
-    state.sessions.insert(resource, session.clone());
+    let mut state_mut = state.write().await;
+    state_mut.sessions.insert(resource, session.clone());
+    drop(state_mut);
 
-    session.lock().await.listen_for_stanzas().await;
+    loop {
+        let result = session.lock().await.listen_stanza(state.clone()).await;
+        if result.is_err() {
+            break;
+        }
+    }
 }

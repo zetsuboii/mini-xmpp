@@ -1,4 +1,6 @@
-use crate::conn::Connection;
+use std::sync::Arc;
+
+use crate::{conn::Connection, handlers::HandleRequest, state::ServerState};
 use color_eyre::eyre;
 use parsers::{
     constants::{NAMESPACE_BIND, NAMESPACE_SASL, NAMESPACE_TLS},
@@ -17,6 +19,7 @@ use parsers::{
     },
 };
 use sqlx::{Pool, Sqlite};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -174,17 +177,25 @@ impl Session {
         Ok(())
     }
 
-    pub async fn listen_for_stanzas(&mut self) {
-        println!("Listening for stanzas");
-        while let Ok(request) = self.connection.read().await {
-            let stanza = match Stanza::read_xml_string(&request) {
-                Ok(stanza) => stanza,
-                Err(e) => {
-                    println!("Error reading stanza: {}", e);
-                    continue;
-                }
-            };
-            dbg!(stanza);
+    pub async fn listen_stanza(&mut self, state: Arc<RwLock<ServerState>>) -> eyre::Result<()> {
+        let request = self.connection.read_timeout(10).await;
+
+        match request {
+            Ok(request) => {
+                let stanza = match Stanza::read_xml_string(&request) {
+                    Ok(stanza) => stanza,
+                    Err(e) => {
+                        eyre::bail!("error reading stanza: {}", e);
+                    }
+                };
+                stanza.handle_request(self, state.clone()).await?;
+            }
+            Err(e) => match e.to_string().as_str() {
+                "timeout" => {}
+                _ => eyre::bail!("connection closed"),
+            },
         }
+
+        Ok(())
     }
 }

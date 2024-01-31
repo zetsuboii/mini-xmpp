@@ -1,10 +1,12 @@
+use std::time::Duration;
+
 use color_eyre::eyre;
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use parsers::jid::Jid;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 pub type Stream = WebSocketStream<TcpStream>;
@@ -42,8 +44,7 @@ impl Connection {
     pub fn split(self) -> (SplitSink<Stream, Message>, SplitStream<Stream>) {
         self.stream.split()
     }
-
-    /// Receives data from the server
+    /// Received data from the server
     pub async fn read(&mut self) -> eyre::Result<String> {
         self.stream
             .next()
@@ -51,6 +52,21 @@ impl Connection {
             .ok_or(eyre::eyre!("no message received"))?
             .and_then(|message| message.into_text())
             .map_err(|e| e.into())
+    }
+
+    /// Receives data from the server
+    pub async fn read_timeout(&mut self, ms: u64) -> eyre::Result<String> {
+        let sleep = time::sleep(Duration::from_millis(ms));
+        tokio::pin!(sleep);
+        tokio::select! {
+            _ = &mut sleep => eyre::bail!("timeout"),
+            (message) = self.stream.next() => {
+                return message
+                    .ok_or(eyre::eyre!("no message received"))?
+                    .and_then(|message| message.into_text())
+                    .map_err(|e| e.into());
+            }
+        }
     }
 
     /// Sends data to the server
