@@ -2,7 +2,8 @@ use std::io::Cursor;
 
 use color_eyre::eyre;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, BytesText, Event}, Reader, Writer
+    events::{BytesEnd, BytesStart, BytesText, Event},
+    Reader, Writer,
 };
 
 use crate::from_xml::{ReadXml, WriteXml};
@@ -64,6 +65,11 @@ impl Jid {
     pub fn resource_part(&self) -> Option<&String> {
         self.resource_part.as_ref()
     }
+
+    /// Returns the bare JID without resource
+    pub fn bare(&self) -> String {
+        format!("{}@{}", self.local_part(), self.domain_part())
+    }
 }
 
 impl TryFrom<String> for Jid {
@@ -100,10 +106,7 @@ impl ToString for Jid {
 }
 
 impl ReadXml<'_> for Jid {
-    fn read_xml<'a>(
-        start: Event<'a>,
-        reader: &mut Reader<&[u8]>,
-    ) -> eyre::Result<Self> {
+    fn read_xml<'a>(start: Event<'a>, reader: &mut Reader<&[u8]>) -> eyre::Result<Self> {
         let start = match start {
             Event::Start(tag) => tag,
             _ => eyre::bail!("invalid start tag"),
