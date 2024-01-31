@@ -1,39 +1,9 @@
 [workspace]
 
-members = [
-    "parsers",
-    "client",
-    "server"
-]
+members = ["parsers", "client", "server"]
 
 [package]
-name = "mini-jabber"
+
+name = "mini-xmpp"
 version = "0.1.0"
 edition = "2021"
-
-[[bin]]
-name = "client"
-
-[[bin]]
-name = "server"
-
-[dependencies]
-# Serialization
-serde = "1.*"
-quick-xml = {version = "0.31.0", features = ["serialize"]}
-url = "2.5.0"
-
-# Errors
-color-eyre = "0.6.*"
-
-# Async
-tokio = { version = "1.35.0", features = ["full"] }
-tokio-tungstenite = "0.21.0"
-futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
-futures-channel = "0.3.28"
-async-trait = "0.1.74"
-base64 = "0.21.7"
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
-sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-native-tls", "sqlite" ] }
-dotenvy = "0.15.7"
-
