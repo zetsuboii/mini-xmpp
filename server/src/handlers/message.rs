@@ -3,8 +3,8 @@ use parsers::{from_xml::WriteXmlString, jid::Jid, stanza::message::Message};
 
 use super::{HandleRequest, Request};
 
-impl<'s> HandleRequest<'s> for Message {
-    async fn handle_request(&self, request: &'s mut Request<'s>) -> eyre::Result<()> {
+impl<'se> HandleRequest<'se> for Message {
+    async fn handle_request(&self, request: &mut Request<'se>) -> eyre::Result<()> {
         if let Some(jid) = &self.to {
             let jid = Jid::try_from(jid.clone())?;
             if let Some(resource) = jid.resource_part() {
@@ -24,8 +24,8 @@ async fn handle_message_with_res(
     message: &Message,
     request: &mut Request<'_>,
 ) -> eyre::Result<()> {
-    let state = request.state().read().await;
-    let current_resource = request.session_mut().get_resource().unwrap();
+    let state = request.state.read().await;
+    let current_resource = request.session.get_resource().unwrap();
     if resource == &current_resource {
         // Don't allow messagin oneself
         return Ok(());
@@ -39,7 +39,7 @@ async fn handle_message_with_res(
         None => {
             // Send error to the client
             request
-                .session_mut()
+                .session
                 .connection
                 .send("no such resource".into())
                 .await?;
@@ -55,8 +55,8 @@ async fn handle_message(
     message: &Message,
     request: &mut Request<'_>,
 ) -> eyre::Result<()> {
-    let state = request.state().read().await;
-    let current_resource = request.session_mut().get_resource().unwrap();
+    let state = request.state.read().await;
+    let current_resource = request.session.get_resource().unwrap();
 
     for (resource, session) in &state.sessions {
         if &current_resource == resource {
