@@ -1,25 +1,16 @@
-use std::sync::Arc;
-
 use color_eyre::eyre;
 use parsers::{from_xml::WriteXmlString, jid::Jid, stanza::message::Message};
-use tokio::sync::RwLock;
 
-use crate::{session::Session, state::ServerState};
+use super::{HandleRequest, Request};
 
-use super::HandleRequest;
-
-impl HandleRequest for Message {
-    async fn handle_request(
-        &self,
-        current_session: &mut Session,
-        state: Arc<RwLock<ServerState>>,
-    ) -> eyre::Result<()> {
+impl<'s> HandleRequest<'s> for Message {
+    async fn handle_request(&self, request: &'s mut Request<'s>) -> eyre::Result<()> {
         if let Some(jid) = &self.to {
             let jid = Jid::try_from(jid.clone())?;
             if let Some(resource) = jid.resource_part() {
-                handle_message_with_res(&resource, self, current_session, state).await?;
+                handle_message_with_res(&resource, self, request).await?;
             } else {
-                handle_message(jid.bare().as_str(), self, current_session, state).await?;
+                handle_message(jid.bare().as_str(), self, request).await?;
             }
         }
         Ok(())
@@ -31,11 +22,10 @@ impl HandleRequest for Message {
 async fn handle_message_with_res(
     resource: &str,
     message: &Message,
-    current_session: &mut Session,
-    state: Arc<RwLock<ServerState>>,
+    request: &mut Request<'_>,
 ) -> eyre::Result<()> {
-    let state = state.read().await;
-    let current_resource = current_session.get_resource().unwrap();
+    let state = request.state().read().await;
+    let current_resource = request.session_mut().get_resource().unwrap();
     if resource == &current_resource {
         // Don't allow messagin oneself
         return Ok(());
@@ -48,7 +38,8 @@ async fn handle_message_with_res(
         }
         None => {
             // Send error to the client
-            current_session
+            request
+                .session_mut()
                 .connection
                 .send("no such resource".into())
                 .await?;
@@ -62,11 +53,10 @@ async fn handle_message_with_res(
 async fn handle_message(
     bare_jid: &str,
     message: &Message,
-    current_session: &mut Session,
-    state: Arc<RwLock<ServerState>>,
+    request: &mut Request<'_>,
 ) -> eyre::Result<()> {
-    let state = state.read().await;
-    let current_resource = current_session.get_resource().unwrap();
+    let state = request.state().read().await;
+    let current_resource = request.session_mut().get_resource().unwrap();
 
     for (resource, session) in &state.sessions {
         if &current_resource == resource {

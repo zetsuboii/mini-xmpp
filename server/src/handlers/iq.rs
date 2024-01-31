@@ -1,28 +1,22 @@
-use std::sync::Arc;
-
 use parsers::{
     constants::NAMESPACE_FRIENDS,
     from_xml::WriteXmlString,
     stanza::iq::{Friends, Iq, IqPayload},
 };
-use tokio::sync::RwLock;
 
-use crate::{session::Session, state::ServerState};
 use color_eyre::eyre;
 
-use super::HandleRequest;
+use super::{HandleRequest, Request};
 
-impl HandleRequest for Iq {
-    async fn handle_request(
-        &self,
-        current_session: &mut Session,
-        state: Arc<RwLock<ServerState>>,
-    ) -> eyre::Result<()> {
+impl<'se> HandleRequest<'se> for Iq {
+    async fn handle_request(&self, request: &'se mut Request<'se>) -> eyre::Result<()> {
         if let Some(payload) = &self.payload {
             match payload {
-                IqPayload::Friends(_) => handle_friends(&self.id, current_session, state).await?,
+                IqPayload::Friends(_) => handle_friends(&self.id, request).await?,
                 _ => {
-                    current_session
+                    // Send error to the client
+                    request
+                        .session_mut()
                         .connection
                         .send("unsupported IQ call".into())
                         .await?
@@ -34,14 +28,11 @@ impl HandleRequest for Iq {
 }
 
 /// Handles "Friends" IQ call, which returns connected clients
-async fn handle_friends(
-    id: &str,
-    current_session: &mut Session,
-    state: Arc<RwLock<ServerState>>,
-) -> eyre::Result<()> {
+async fn handle_friends(id: &str, request: &mut Request<'_>) -> eyre::Result<()> {
+    let state = request.state();
     let state = state.read().await;
-    let current_resource = current_session.get_resource().unwrap();
-    let current_jid = current_session.connection.get_jid().unwrap();
+    let current_resource = request.session_mut().get_resource().unwrap();
+    let current_jid = request.session_mut().connection.get_jid().unwrap();
 
     // Filter out connections with different bare JIDs
     let mut friends = Vec::new();
@@ -65,7 +56,8 @@ async fn handle_friends(
         friend_list: Some(friends),
     }));
 
-    current_session
+    request
+        .session_mut()
         .connection
         .send(iq.write_xml_string()?)
         .await?;

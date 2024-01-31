@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use crate::{conn::Connection, handlers::HandleRequest, state::ServerState};
+use crate::{
+    conn::Connection,
+    handlers::{HandleRequest, Request},
+    state::ServerState,
+};
 use color_eyre::eyre;
 use parsers::{
     constants::{NAMESPACE_BIND, NAMESPACE_SASL, NAMESPACE_TLS},
@@ -178,9 +182,9 @@ impl Session {
     }
 
     pub async fn listen_stanza(&mut self, state: Arc<RwLock<ServerState>>) -> eyre::Result<()> {
-        let request = self.connection.read_timeout(10).await;
+        let data = self.connection.read_timeout(10).await;
 
-        match request {
+        match data {
             Ok(request) => {
                 let stanza = match Stanza::read_xml_string(&request) {
                     Ok(stanza) => stanza,
@@ -188,7 +192,8 @@ impl Session {
                         eyre::bail!("error reading stanza: {}", e);
                     }
                 };
-                stanza.handle_request(self, state.clone()).await?;
+                let mut request = Request::new(self, state.clone());
+                stanza.handle_request(&mut request).await?;
             }
             Err(e) => match e.to_string().as_str() {
                 "timeout" => {}
