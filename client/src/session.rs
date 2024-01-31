@@ -1,16 +1,22 @@
+use std::io::{BufRead, Write};
+
 use color_eyre::eyre;
 use parsers::{
     constants::{NAMESPACE_BIND, NAMESPACE_SASL, NAMESPACE_TLS},
     empty::IsEmpty,
     from_xml::{ReadXmlString, WriteXmlString},
     jid::Jid,
-    stanza::iq::{Bind, Iq, IqPayload},
+    stanza::{
+        iq::{Bind, Iq, Payload},
+        message, Stanza,
+    },
     stream::{
         auth::{AuthRequest, AuthSuccess, PlaintextCredentials},
         features::{Features, Mechanism, StartTls, StartTlsResponse, StartTlsResult},
         initial::InitialHeader,
     },
 };
+use quick_xml::escape::unescape;
 use uuid::Uuid;
 
 use crate::conn::Connection;
@@ -53,7 +59,7 @@ impl Session {
             .unwrap();
 
         // Get response
-        let response = self.connection.read().await?;
+        let response = self.connection.recv().await?;
         let header = InitialHeader::read_xml_string(&response)?;
 
         self.id = header.id;
@@ -66,7 +72,7 @@ impl Session {
     /// And we skip TLS negotiation even when it is required
     async fn negotiate_features(&mut self) -> eyre::Result<()> {
         // Get features from server
-        let response = self.connection.read().await?;
+        let response = self.connection.recv().await?;
         let features = Features::read_xml_string(&response)?;
 
         // If no features, no need to negotiate
@@ -93,7 +99,7 @@ impl Session {
                     .await?;
 
                 // Get response
-                let response = self.connection.read().await?;
+                let response = self.connection.recv().await?;
                 let tls_response = StartTlsResponse::read_xml_string(response.as_str());
 
                 // TODO: Server doesn't add xmlns attribute to the response
@@ -116,7 +122,7 @@ impl Session {
     /// Binds a resource to the session
     async fn bind_resource(&mut self) -> eyre::Result<()> {
         // Get stream features from server and check if bind option is available
-        let response = self.connection.read().await?;
+        let response = self.connection.recv().await?;
         let features = Features::read_xml_string(&response)?;
         features
             .bind
@@ -132,15 +138,15 @@ impl Session {
         let mut bind = Bind::new(NAMESPACE_BIND.into());
         bind.resource = self.jid.resource_part.take();
         bind.jid = Some(self.jid.clone());
-        iq.payload = Some(IqPayload::Bind(bind));
+        iq.payload = Some(Payload::Bind(bind));
 
         self.connection.send(iq.write_xml_string()?).await?;
 
         // Get response and save the resource
-        let response = self.connection.read().await?;
+        let response = self.connection.recv().await?;
         let iq = Iq::read_xml_string(response.as_str())?;
 
-        if let Some(IqPayload::Bind(bind)) = iq.payload {
+        if let Some(Payload::Bind(bind)) = iq.payload {
             self.jid.resource_part = bind.jid.and_then(|jid| jid.resource_part);
         } else {
             eyre::bail!("invalid bind response")
@@ -166,7 +172,7 @@ impl Session {
         self.connection.send(auth.write_xml_string()?).await?;
 
         // Get response and assert that it is success
-        let response = self.connection.read().await?;
+        let response = self.connection.recv().await?;
         AuthSuccess::read_xml_string(response.as_str())?;
         self.reset().await?;
 
@@ -176,8 +182,95 @@ impl Session {
         Ok(())
     }
 
+    /// Sends a stanza to server
     pub async fn send_stanza(&mut self, stanza: impl WriteXmlString) -> eyre::Result<()> {
         self.connection.send(stanza.write_xml_string()?).await?;
         Ok(())
     }
+
+    /// Waits for a stanza from server
+    pub async fn recv_stanza(&mut self) -> eyre::Result<Stanza> {
+        let response = self.connection.recv().await?;
+        Stanza::read_xml_string(response.as_str())
+    }
+
+    /// Start sending and receving messages
+    pub async fn start_messaging(self) -> eyre::Result<()> {
+        let (mut reader, mut writer) = self.connection.split();
+
+        // Start listening for messages
+        let receiver = tokio::spawn(async move {
+            loop {
+                let response = reader.recv().await.unwrap();
+                let stanza = Stanza::read_xml_string(response.as_str()).unwrap();
+                match stanza {
+                    Stanza::Message(message) => {
+                        let from = message.from.unwrap_or("unknown".into());
+                        let body = message.body.unwrap_or("".into());
+
+                        println!("\rfrom: {}", from);
+                        println!("< {}", unescape(body.as_ref()).unwrap());
+                        print!("{}\nto: ", "=".repeat(32));
+                        std::io::stdout().lock().flush().expect("failed to flush");
+                    }
+                    Stanza::Presence(presence) => {
+                        let from = presence.from.unwrap_or("unknown".to_string());
+
+                        println!("\r< {} now online", from);
+                        print!("{}\nto: ", "=".repeat(32));
+                        std::io::stdout().lock().flush().expect("failed to flush");
+                    }
+                    _ => continue,
+                }
+            }
+        });
+
+        // Start getting user input and sending messages
+        let sender = tokio::spawn(async move {
+            loop {
+                // Make a new line
+                print!("to: ");
+                std::io::stdout().lock().flush().expect("failed to flush");
+                let to = get_user_input();
+
+                // Make a new line
+                print!("> ");
+                std::io::stdout().lock().flush().expect("failed to flush");
+                let input = get_user_input();
+
+                // Send user input
+                let message = Stanza::Message(message::Message {
+                    id: Uuid::new_v4().to_string().into(),
+                    from: self.jid.to_string().into(),
+                    to: to.into(),
+                    body: input.into(),
+                    xml_lang: "en".to_string().into(),
+                });
+                writer
+                    .send(message.write_xml_string().unwrap())
+                    .await
+                    .unwrap();
+            }
+        });
+
+        receiver.await?;
+        sender.await?;
+        Ok(())
+    }
+}
+
+fn get_user_input() -> String {
+    let mut input = String::new();
+
+    // Read user input
+    std::io::stdin()
+        .lock()
+        .read_line(&mut input)
+        .expect("failed to read to string");
+
+    while input.ends_with("\n") {
+        input.truncate(input.len() - 1);
+    }
+
+    input
 }

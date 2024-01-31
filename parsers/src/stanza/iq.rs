@@ -21,7 +21,7 @@ pub struct Iq {
     pub id: String,
     pub from: Option<String>,
     pub type_: Option<String>,
-    pub payload: Option<IqPayload>,
+    pub payload: Option<Payload>,
 }
 
 impl Iq {
@@ -59,14 +59,13 @@ impl ReadXml<'_> for Iq {
                 Event::Empty(ref tag) | Event::Start(ref tag) => match tag.name().as_ref() {
                     // <bind> or <bind/>
                     b"bind" => {
-                        result.payload = Bind::read_xml(event, reader)
-                            .map(IqPayload::Bind)
-                            .map(Some)?
+                        result.payload =
+                            Bind::read_xml(event, reader).map(Payload::Bind).map(Some)?
                     }
                     // <friends> or <friends/>
                     b"friends" => {
                         result.payload = Friends::read_xml(event, reader)
-                            .map(IqPayload::Friends)
+                            .map(Payload::Friends)
                             .map(Some)?
                     }
                     _ => eyre::bail!("invalid tag name"),
@@ -118,12 +117,12 @@ impl WriteXml for Iq {
 
 /// Possible payloads for an IQ stanza.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IqPayload {
+pub enum Payload {
     Bind(Bind),
     Friends(Friends),
 }
 
-impl ReadXml<'_> for IqPayload {
+impl ReadXml<'_> for Payload {
     fn read_xml<'a>(
         root: Event<'a>,
         reader: &mut quick_xml::Reader<&[u8]>,
@@ -142,7 +141,7 @@ impl ReadXml<'_> for IqPayload {
     }
 }
 
-impl WriteXml for IqPayload {
+impl WriteXml for Payload {
     fn write_xml(&self, writer: &mut Writer<Cursor<Vec<u8>>>) -> eyre::Result<()> {
         match self {
             Self::Bind(bind) => bind.write_xml(writer),
@@ -381,7 +380,7 @@ mod tests {
                 id: "123".to_string(),
                 from: Some("alice@mail".to_string()),
                 type_: Some("set".to_string()),
-                payload: Some(IqPayload::Bind(Bind {
+                payload: Some(Payload::Bind(Bind {
                     xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
                     jid: Some(Jid::new("alice", "mail.com")),
                     resource: Some("phone".to_string()),
@@ -397,10 +396,10 @@ mod tests {
             <resource> phone </resource>
         </bind>"#;
 
-        let payload = IqPayload::read_xml_string(xml).unwrap();
+        let payload = Payload::read_xml_string(xml).unwrap();
         assert_eq!(
             payload,
-            IqPayload::Bind(Bind {
+            Payload::Bind(Bind {
                 xmlns: "urn:ietf:params:xml:ns:xmpp-bind".to_string(),
                 jid: Some(Jid::new("alice", "mail.com")),
                 resource: Some("phone".to_string()),

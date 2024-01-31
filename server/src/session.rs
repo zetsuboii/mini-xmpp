@@ -11,7 +11,7 @@ use parsers::{
     from_xml::{ReadXmlString, WriteXmlString},
     jid::Jid,
     stanza::{
-        iq::{self, Iq, IqPayload},
+        iq::{self, Iq, Payload},
         Stanza,
     },
     stream::{
@@ -155,7 +155,7 @@ impl Session {
         let request = self.connection.read().await?;
         let iq_req = Iq::read_xml_string(&request)?;
         let bind = match &iq_req.payload {
-            Some(IqPayload::Bind(bind)) => bind,
+            Some(Payload::Bind(bind)) => bind,
             _ => eyre::bail!("Expected bind payload"),
         };
 
@@ -170,7 +170,7 @@ impl Session {
         let mut iq_res = iq_req;
         iq_res.from = None;
         iq_res.type_ = Some("result".into());
-        iq_res.payload = Some(IqPayload::Bind(iq::Bind {
+        iq_res.payload = Some(Payload::Bind(iq::Bind {
             xmlns: NAMESPACE_BIND.into(),
             jid: Some(jid.clone()),
             resource: None,

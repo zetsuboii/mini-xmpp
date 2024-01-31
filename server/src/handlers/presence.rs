@@ -21,7 +21,10 @@ impl<'se> HandleRequest<'se> for Presence {
                         continue;
                     }
                 }
-                session.connection.send(self.write_xml_string()?).await?;
+                // We don't care about if presences reach connections or not
+                match session.connection.send(self.write_xml_string()?).await {
+                    _ => {}
+                }
             }
         }
         Ok(())

@@ -1,7 +1,7 @@
 use parsers::{
     constants::NAMESPACE_FRIENDS,
     from_xml::WriteXmlString,
-    stanza::iq::{Friends, Iq, IqPayload},
+    stanza::iq::{Friends, Iq, Payload},
 };
 
 use color_eyre::eyre;
@@ -12,7 +12,7 @@ impl<'se> HandleRequest<'se> for Iq {
     async fn handle_request(&self, request: &mut Request<'se>) -> eyre::Result<()> {
         if let Some(payload) = &self.payload {
             match payload {
-                IqPayload::Friends(_) => handle_friends(&self.id, request).await?,
+                Payload::Friends(_) => handle_friends(&self.id, request).await?,
                 _ => {
                     // Send error to the client
                     request
@@ -50,7 +50,7 @@ async fn handle_friends(id: &str, request: &mut Request<'_>) -> eyre::Result<()>
 
     let mut iq = Iq::new(id.into());
     iq.type_ = Some("result".into());
-    iq.payload = Some(IqPayload::Friends(Friends {
+    iq.payload = Some(Payload::Friends(Friends {
         xmlns: NAMESPACE_FRIENDS.into(),
         friend_list: Some(friends),
     }));

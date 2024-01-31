@@ -34,6 +34,9 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
     let mut session = Session::new(pool, conn);
     session.handshake().await.unwrap();
 
+    let jid = session.connection.get_jid().unwrap().to_string();
+    println!("{jid} connected",);
+
     let resource = session.get_resource().unwrap();
     let session = Arc::new(Mutex::new(session));
 
@@ -44,7 +47,14 @@ async fn accept_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
 
     loop {
         let result = session.lock().await.listen_stanza(state.clone()).await;
-        if result.is_err() {
+        if let Err(report) = result {
+            let message = report.to_string();
+            if &message == "connection closed" {
+                println!("{jid} disconnected");
+            } else {
+                println!("{:?}", report);
+            }
+
             break;
         }
     }

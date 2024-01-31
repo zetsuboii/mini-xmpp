@@ -8,7 +8,7 @@ use self::iq::Iq;
 use self::message::Message;
 use self::presence::Presence;
 
-pub  mod iq;
+pub mod iq;
 pub mod message;
 pub mod presence;
 
@@ -55,7 +55,7 @@ impl WriteXml for Stanza {
 
 #[cfg(test)]
 mod tests {
-    use tests::iq::{Friends, IqPayload};
+    use tests::iq::{Friends, Payload};
 
     use crate::from_xml::ReadXmlString;
 
@@ -116,7 +116,7 @@ mod tests {
                 id: "123".into(),
                 from: Some("alice@mail.com".to_string()),
                 type_: Some("get".to_string()),
-                payload: Some(IqPayload::Friends(Friends {
+                payload: Some(Payload::Friends(Friends {
                     xmlns: "urn:example:friends".to_string(),
                     ..Default::default()
                 })),

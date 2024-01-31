@@ -1,8 +1,10 @@
 use parsers::{
+    constants::NAMESPACE_FRIENDS,
     jid::Jid,
-    stanza::{message, Stanza},
+    stanza::{iq, presence, Stanza},
     stream::auth::PlaintextCredentials,
 };
+use uuid::Uuid;
 
 use crate::{conn::Connection, session::Session};
 
@@ -18,6 +20,7 @@ fn get_user_input(prompt: &'static str) -> String {
 
 #[tokio::main]
 async fn main() {
+    println!(":: xmpp client ::");
     let address = "ws://127.0.0.1:9292";
     let url = url::Url::parse(address).expect("invalid address");
 
@@ -33,12 +36,43 @@ async fn main() {
     session.handshake().await.unwrap();
     println!("Handshake successful");
 
-    let stanza = Stanza::Message(message::Message {
-        id: None,
-        from: Some(jid.to_string()),
-        to: Some("other@mail".into()),
-        body: Some("Hello world".into()),
-        xml_lang: Some("en".into()),
+    // Send presence message
+    let presence = Stanza::Presence(presence::Presence {
+        id: Uuid::new_v4().to_string().into(),
+        from: jid.to_string().into(),
+        ..Default::default()
     });
-    session.send_stanza(stanza).await.unwrap();
+    session.send_stanza(presence).await.unwrap();
+
+    // Get connected clients
+    let friends_iq = Stanza::Iq(iq::Iq {
+        id: Uuid::new_v4().to_string(),
+        from: jid.to_string().into(),
+        type_: "get".to_string().into(),
+        payload: iq::Payload::Friends(iq::Friends {
+            xmlns: NAMESPACE_FRIENDS.into(),
+            ..Default::default()
+        })
+        .into(),
+    });
+    session.send_stanza(friends_iq).await.unwrap();
+
+    let server_response = session.recv_stanza().await.unwrap();
+    let iq_response = match server_response {
+        Stanza::Iq(iq) => iq,
+        _ => panic!("invalid response from server {:?}", server_response),
+    };
+    let friends = match iq_response.payload {
+        Some(iq::Payload::Friends(friends)) => friends,
+        _ => panic!("invalid payload from server {:?}", iq_response.payload),
+    };
+    if let Some(list) = friends.friend_list {
+        for friend in list {
+            println!("\r< {} online", friend.to_string());
+        }
+    }
+    println!("{}", "=".repeat(32));
+
+    // Start sending and receiving messages
+    session.start_messaging().await.unwrap();
 }

@@ -9,6 +9,34 @@ use url::Url;
 
 pub type Stream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+pub struct Reader(SplitStream<Stream>);
+
+impl Reader {
+    pub fn from(inner: SplitStream<Stream>) -> Self {
+        Self(inner)
+    }
+
+    pub async fn recv(&mut self) -> eyre::Result<String> {
+        self.0
+            .next()
+            .await
+            .and_then(|result| result.ok())
+            .and_then(|message| message.into_text().ok())
+            .ok_or(eyre::eyre!("no message received"))
+    }
+}
+pub struct Writer(SplitSink<Stream, Message>);
+
+impl Writer {
+    pub fn from(inner: SplitSink<Stream, Message>) -> Self {
+        Self(inner)
+    }
+
+    pub async fn send(&mut self, data: String) -> eyre::Result<()> {
+        self.0.send(Message::Text(data)).await.map_err(|e| e.into())
+    }
+}
+
 /// Struct to represent connection on the client side
 #[derive(Debug)]
 pub struct Connection {
@@ -28,12 +56,13 @@ impl Connection {
     }
 
     /// Split the stream into sink and stream
-    pub fn split(self) -> (SplitSink<Stream, Message>, SplitStream<Stream>) {
-        self.stream.split()
+    pub fn split(self) -> (Reader, Writer) {
+        let (writer_inner, reader_inner) = self.stream.split();
+        (Reader::from(reader_inner), Writer::from(writer_inner))
     }
 
     /// Receives data from the server
-    pub async fn read(&mut self) -> eyre::Result<String> {
+    pub async fn recv(&mut self) -> eyre::Result<String> {
         self.stream
             .next()
             .await
