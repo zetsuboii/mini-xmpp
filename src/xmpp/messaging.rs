@@ -195,6 +195,7 @@ impl TryFrom<&str> for Stanza {
         let mut reader = Reader::from_str(value);
         let start_tag = match reader.read_event()? {
             Event::Start(tag) => tag,
+            Event::Empty(tag) => tag,
             _ => eyre::bail!("invalid xml"),
         };
 
